@@ -1,3 +1,8 @@
-fn main() {
-    println!("Hello, world!");
+mod server;
+mod client;
+mod common;
+
+#[tokio::main]
+async fn main() {
+
 }
