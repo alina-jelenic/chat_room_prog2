@@ -1,5 +1,5 @@
 mod server;
-mod client;
+mod podatkovni_tipi;
 mod common;
 
 #[tokio::main]
