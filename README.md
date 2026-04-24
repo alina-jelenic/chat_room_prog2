@@ -13,16 +13,29 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 ## Struktura projekta
 
 ├── Cargo.toml # konfiguracija projekta in odvisnosti
+
 ├── README.md # opis projekta
+
 └── src/
+
     ├── main.rs # vstopna točka programa (zagon aplikacije)
+
     │
+
     ├── server/ # strežniški del aplikacije
+
     │   ├── mod.rs # definicija modula server
+
     │   └── connection.rs # logika posamezne povezave z odjemalcem
+
     │
+
     ├── client/ # odjemalski del aplikacije
+
     │ └── mod.rs # definicija modula client
+
     │
+
     └── common/ # skupni podatkovni tipi
-    |    └── mod.rs # npr. struktura Message.
+
+    |    └── mod.rs # npr. struktura Message
