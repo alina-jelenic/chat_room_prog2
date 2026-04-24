@@ -22,20 +22,19 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 
     │
 
-    ├── server/ # strežniški del aplikacije
+    ├── server/ # logika strežnika, upravljanje sob in klientov
 
     │   ├── mod.rs # definicija modula server
 
-    │   └── connection.rs # logika posamezne povezave z odjemalcem
+    │   └── connection.rs # logika posamezne povezave med uporabniki
 
     │
 
-    ├── client/ # odjemalski del aplikacije
+    ├── podatkovni tipi/ # user, sobe, sporočila
 
-    │ └── mod.rs # definicija modula client
+        └── mod.rs 
+        └── soba.rs
+        └── sporocila.rs
+        └── user.rs
 
-    │
 
-    └── common/ # skupni podatkovni tipi
-
-    |    └── mod.rs # npr. struktura Message
