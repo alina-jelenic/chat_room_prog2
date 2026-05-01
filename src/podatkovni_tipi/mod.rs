@@ -1,6 +1,6 @@
-mod soba;
-mod sporocila;
-mod user;
+pub mod soba;
+pub mod sporocila;
+pub mod user;
 
 //pub use soba::*;
 //pub use sporocila::*;
