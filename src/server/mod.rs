@@ -8,22 +8,22 @@ use state::ServerState;
 
 // run skrbi za strežnik
 pub async fn run() {
-//    let poslusalec = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-//    let state = Arc::new(Mutex::new(ServerState::new()));
-//
-//    loop {
-//        let (stream, _) = poslusalec.accept().await.unwrap();
-//
-//        let conn = Connection::new(
-//            "gost".to_string(),
-//            stream,
-//            state.clone(),
-//        );
-//
-//        tokio::spawn(async move {
-//            conn.handle().await;
-//        });
-//    }
+    let poslusalec = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+    let state = Arc::new(Mutex::new(ServerState::new()));
+
+    loop {
+        let (stream, _) = poslusalec.accept().await.unwrap();
+
+        let conn = Connection::new(
+            "gost".to_string(),
+            stream,
+            state.clone(),
+        );
+
+        tokio::spawn(async move {
+            conn.handle().await;
+        });
+    }
 }
 
 
