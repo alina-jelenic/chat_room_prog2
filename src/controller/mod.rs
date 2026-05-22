@@ -1,10 +1,11 @@
-pub mod connection;
-pub mod state;
+pub mod tipi;
+pub mod cli;
+pub mod web;
 
 use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use connection::Connection;
-use state::ServerState;
+use tipi::Connection;
+use tipi::ServerState;
 
 // run skrbi za strežnik
 pub async fn run() {
@@ -29,7 +30,7 @@ pub async fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::state::ServerState;
+    use super::tipi::ServerState;
     use crate::podatkovni_tipi::{soba::Soba, user::Client};
 
     #[test]
