@@ -6,36 +6,45 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-        todo!();
-
         manager
             .create_table(
                 Table::create()
-                    .table(Post::Table)
+                    .table(Message::Table)
                     .if_not_exists()
-                    .col(pk_auto(Post::Id))
-                    .col(string(Post::Title))
-                    .col(string(Post::Text))
+                    .col(pk_auto(Message::Id))
+                    .col(big_unsigned_null(Message::SenderId))
+                    .col(text(Message::Content))
+                    .col(big_unsigned(Message::Timestamp))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-message-sender")
+                            .from(Message::Table, Message::SenderId)
+                            .to(Client::Table, Client::Id)
+                            .on_delete(ForeignKeyAction::SetNull),
+                    )
                     .to_owned(),
             )
             .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-        todo!();
-
         manager
-            .drop_table(Table::drop().table(Post::Table).to_owned())
+            .drop_table(Table::drop().table(Message::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Post {
+enum Message {
     Table,
     Id,
-    Title,
-    Text,
+    SenderId,
+    Content,
+    Timestamp,
+}
+
+#[derive(DeriveIden)]
+enum Client {
+    Table,
+    Id,
 }
