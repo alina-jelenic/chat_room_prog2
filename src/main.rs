@@ -1,9 +1,9 @@
 use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
-use crate::{podatkovni_tipi::user, server::{connection::Connection, state::ServerState}};
+use crate::{podatkovni_tipi::user, controller::{tipi::Connection, tipi::ServerState}};
 
-mod server;
+mod controller;
 mod podatkovni_tipi;
 
 

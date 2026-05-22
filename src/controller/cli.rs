@@ -1,16 +1,9 @@
+use crate::{Connection, ServerState};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpStream;
 use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
 
-use crate::server::state::ServerState;
-
-pub struct Connection {
-    pub username: String,
-    pub stream: TcpStream,
-    pub state: Arc<Mutex<ServerState>>,
-}
-
-impl Connection {
+impl Connection<TcpStream> {
     pub fn new(username: String, stream: TcpStream, state: Arc<Mutex<ServerState>>) -> Self {
         Self { username, stream, state }
     }

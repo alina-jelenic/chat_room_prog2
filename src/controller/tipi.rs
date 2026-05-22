@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
+use std::sync::{Arc, Mutex};
+use tokio::net::TcpStream;
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
+
+
 use crate::podatkovni_tipi::{soba::Soba, user::Client};
 
 pub struct ServerState {
@@ -31,3 +36,12 @@ impl ServerState {
         self.sobe.get_mut(name)
     }
 }
+
+
+pub struct Connection<S> {
+    pub username: String,
+    pub stream: S,
+    pub state: Arc<Mutex<ServerState>>,
+}
+
+

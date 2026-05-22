@@ -11,6 +11,6 @@ impl Message {
     }
 
     pub fn format(&self) -> String {
-        format!("[{}, {}]: {}", self.sender,self.timestamp,  self.content)
+        format!("[{}, {}]: {}", self.sender, self.timestamp,  self.content)
     }
 }
