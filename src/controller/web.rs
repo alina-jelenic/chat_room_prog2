@@ -56,7 +56,7 @@ async fn handle_socket(socket: WebSocket, username: String, state: SharedState) 
 
     let send_task = tokio::spawn(async move {
         while let Ok(message) = rx.recv().await {
-            if sender.send(Message::Text(message)).await.is_err() {
+            if sender.send(Message::Text(message.into())).await.is_err() {
                 break;
             }
         }
