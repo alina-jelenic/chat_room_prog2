@@ -2,7 +2,7 @@ use crate::{Connection, ServerState};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpStream;
 use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
-
+// preveriti če v terminalu tudi deluje websocket
 impl Connection<TcpStream> {
     pub fn new(username: String, stream: TcpStream, state: Arc<Mutex<ServerState>>) -> Self {
         Self { username, stream, state }

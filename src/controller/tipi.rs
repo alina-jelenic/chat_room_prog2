@@ -7,7 +7,8 @@ use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
 
 
 use crate::podatkovni_tipi::{soba::Soba, user::Client};
-
+// v serverstate dod novo spremenljivo za bazo podatkov, ki bo shranjevala sobe in uporabnike, namesto sob in uporabnikov
+// tx se bo spremenil v HashMap<String, broadcast::Sender<String>>, kjer bo ključ ime sobe, vrednost pa kanal za to sobo
 pub struct ServerState {
     pub sobe: HashMap<String, Soba>,
     pub uporabniki: HashMap<u64, Client>,
