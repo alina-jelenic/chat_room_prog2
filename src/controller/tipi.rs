@@ -1,14 +1,10 @@
+use crate::podatkovni_tipi::{soba::Soba, user::Client};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
-use std::sync::{Arc, Mutex};
-use tokio::net::TcpStream;
-use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
+pub type SharedState = Arc<Mutex<ServerState>>;
 
-
-use crate::podatkovni_tipi::{soba::Soba, user::Client};
-// v serverstate dod novo spremenljivo za bazo podatkov, ki bo shranjevala sobe in uporabnike, namesto sob in uporabnikov
-// tx se bo spremenil v HashMap<String, broadcast::Sender<String>>, kjer bo ključ ime sobe, vrednost pa kanal za to sobo
 pub struct ServerState {
     pub sobe: HashMap<String, Soba>,
     pub uporabniki: HashMap<u64, Client>,
@@ -18,11 +14,16 @@ pub struct ServerState {
 impl ServerState {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel::<String>(64);
+
         Self {
             sobe: HashMap::new(),
             uporabniki: HashMap::new(),
-            tx: tx,
+            tx,
         }
+    }
+
+    pub fn shared() -> SharedState {
+        Arc::new(Mutex::new(Self::new()))
     }
 
     pub fn create_room(&mut self, name: &str) {
@@ -38,11 +39,8 @@ impl ServerState {
     }
 }
 
-
 pub struct Connection<S> {
     pub username: String,
     pub stream: S,
-    pub state: Arc<Mutex<ServerState>>,
+    pub state: SharedState,
 }
-
-
