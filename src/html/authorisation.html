@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ChatRoom — Sign In / Create account</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  
+  <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f3ef; --surface: #ffffff; --border: #e2ddd6;
+      --text: #1a1816; --muted: #8a857d; --accent: #2a6049;
+      --accent-h: #1f4a37; --error: #b94040; --radius: 10px;
+    }
+
+    body {
+      min-height: 100vh; background: var(--bg); display: flex;
+      align-items: center; justify-content: center; font-family: 'DM Sans', sans-serif;
+      color: var(--text);
+    }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; width: 100%; max-width: 420px;
+      padding: 48px 44px 40px; box-shadow: 0 4px 40px rgba(0,0,0,0.06);
+    }
+
+    .wordmark { font-family: 'DM Serif Display', serif; font-size: 1.6rem; margin-bottom: 8px; }
+    .tagline { font-size: .8rem; color: var(--muted); margin-bottom: 36px; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* skrij gumbe za premikanje med karticama*/
+    .tab-input {
+      display: none;
+    }
+
+    /* kartice*/
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+
+    .tab-label {
+      flex: 1;
+      text-align: center;
+      padding: 12px 16px;
+      font-size: .875rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 500;
+      position: relative;
+    }
+
+    /* ko klikneš se pokaže prava kartica*/
+    .tab-input:has(+ .tab-label) {
+    }
+    
+    #login-tab:checked ~ .tab-bar .tab-label[for="login-tab"],
+    #register-tab:checked ~ .tab-bar .tab-label[for="register-tab"] {
+      color: var(--text);
+    }
+
+    #login-tab:checked ~ .tab-bar .tab-label[for="login-tab"]::after,
+    #register-tab:checked ~ .tab-bar .tab-label[for="register-tab"]::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--accent);
+    }
+
+    /* da se pokaže prava kartica ko jo klikneš gor*/
+    .form-kartica {
+      display: none;
+    }
+
+    #login-tab:checked ~ #login-kartica,
+    #register-tab:checked ~ #register-kartica {
+      display: block;
+    }
+
+    /* stil kartic */
+    .field { margin-bottom: 18px; }
+    label:not(.tab-label) {
+      display: block; font-size: .75rem; font-weight: 500; color: var(--muted);
+      margin-bottom: 7px; text-transform: uppercase; letter-spacing: .05em;
+    }
+
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: 11px 14px; border: 1px solid var(--border);
+      border-radius: var(--radius); background: var(--bg); font-size: .9rem;
+    }
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(42,96,73,.12);
+      outline: none;
+    }
+
+    .btn {
+      width: 100%; padding: 13px; background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius); font-weight: 500;
+      cursor: pointer; margin-top: 8px;
+    }
+    .btn:hover { background: var(--accent-h); }
+
+    .server-msg {
+      padding: 11px 14px; border-radius: var(--radius); font-size: .83rem;
+      margin-bottom: 18px; display: none;
+    }
+    .server-msg.error   { background: #fdf0f0; color: var(--error); border: 1px solid #f3c8c8; display: block; }
+    .server-msg.success { background: #edf7f2; color: var(--accent); border: 1px solid #b5dcc8; display: block; }
+
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">ChatRoom</div>
+  <div class="tagline">Real-time conversations</div>
+
+  <!--radio gumbi -->
+  <input type="radio" id="login-tab" name="auth-tab" class="tab-input" checked>
+  <input type="radio" id="register-tab" name="auth-tab" class="tab-input">
+
+  
+  <div class="tab-bar">
+    <label for="login-tab" class="tab-label">Sign in</label>
+    <label for="register-tab" class="tab-label">Create account</label>
+  </div>
+
+  <!-- LOGIN kartica -->
+  <div id="login-kartica" class="form-kartica">
+    <div id="login-msg" class="server-msg"></div>
+    
+    <form hx-post="/api/login"
+          hx-target="#login-msg"
+          hx-swap="innerHTML"
+          hx-indicator="#login-btn">
+      
+      <div class="field">
+        <label>Username</label>
+        <input name="username" type="text" placeholder="username" required>
+      </div>
+      
+      <div class="field">
+        <label>Password</label>
+        <input name="password" type="password" placeholder="••••••••" required>
+      </div>
+      
+      <button id="login-btn" class="btn" type="submit">
+        <span class="htmx-indicator">Signing in… </span>
+        <span>Sign in</span>
+      </button>
+    </form>
+  </div>
+
+  <!-- REGISTER kartica -->
+  <div id="register-kartica" class="form-kartica">
+    <div id="register-msg" class="server-msg"></div>
+    
+    <form hx-post="/api/register"
+          hx-target="#register-msg"
+          hx-swap="innerHTML"
+          hx-indicator="#register-btn">
+      
+      <div class="field">
+        <label>Username</label>
+        <input name="username" type="text" placeholder="choose a username" required>
+      </div>
+
+      
+      <div class="field">
+        <label>Password</label>
+        <input name="password" type="password" placeholder="min. 6 characters" required>
+      </div>
+      
+      <div class="field">
+        <label>Confirm Password</label>
+        <input name="confirm" type="password" placeholder="repeat password" required>
+      </div>
+      
+      <button id="register-btn" class="btn" type="submit">
+        <span class="htmx-indicator">Creating account… </span>
+        <span>Create account</span>
+      </button>
+    </form>
+  </div>
+</div>
+</body>
+</html>
