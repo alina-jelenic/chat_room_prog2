@@ -3,23 +3,22 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
-pub async fn run_tcp() -> tokio::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    let state = ServerState::shared();
+// pub async fn run_tcp() -> tokio::io::Result<()> {
+//     let listener = TcpListener::bind("127.0.0.1:8080").await?;
 
-    println!("TCP chat posluša na 127.0.0.1:8080");
+//     println!("TCP chat posluša na 127.0.0.1:8080");
 
-    loop {
-        let (socket, addr) = listener.accept().await?;
-        let state = Arc::clone(&state);
-        let username = addr.to_string();
-        let conn = Connection::new(username, socket, state);
+//     loop {
+//         let (socket, addr) = listener.accept().await?;
+//         let state = Arc::clone(&state);
+//         let username = addr.to_string();
+//         let conn = Connection::new(username, socket, state);
 
-        tokio::spawn(async move {
-            conn.handle().await;
-        });
-    }
-}
+//         tokio::spawn(async move {
+//             conn.handle().await;
+//         });
+//     }
+// }
 
 impl Connection<TcpStream> {
     pub fn new(username: String, stream: TcpStream, state: SharedState) -> Self {

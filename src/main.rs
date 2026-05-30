@@ -1,16 +1,22 @@
 use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
+use sea_orm::Database;
 
-use crate::{podatkovni_tipi::user, controller::{tipi::Connection, tipi::ServerState}};
+use crate::{controller::{tipi::Connection, tipi::ServerState}};
 
 mod controller;
 mod podatkovni_tipi;
+mod entities;
 
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()>{
+    let db = Database::connect("sqlite://./chat.db?mode=rwc")
+        .await
+        .expect("Ne morem se povezati z bazo");
+
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    let state = Arc::new(Mutex::new(ServerState::new()));
+    let state = Arc::new(Mutex::new(ServerState::new(db).await));
 
     loop{
         // socket - stream kjer se pogovarjal, addr - moj naslov

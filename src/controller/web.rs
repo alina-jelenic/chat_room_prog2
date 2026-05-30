@@ -10,15 +10,15 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use std::sync::Arc;
+// use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 struct WsQuery {
     username: Option<String>,
 }
 
-pub async fn run_websocket() -> Result<(), Box<dyn std::error::Error>> {
-    let state = ServerState::shared();
+pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
+    
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
