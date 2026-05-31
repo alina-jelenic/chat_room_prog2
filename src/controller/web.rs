@@ -53,14 +53,17 @@ async fn handle_socket(socket: WebSocket, username: String, state: SharedState) 
     let (mut sender, mut receiver) = socket.split();
 
     let _ = tx.send(format!("*** {username} se je pridružil ***"));
-
+    let user = username.clone();
     let send_task = tokio::spawn(async move {
         while let Ok(message) = rx.recv().await {
-            if sender.send(Message::Text(message.into())).await.is_err() {
-                break;
+            if !message.starts_with(&format!("{user}:")) {
+                if sender.send(Message::Text(message.into())).await.is_err() {
+                    break;
+                }
             }
         }
     });
+
 
     while let Some(result) = receiver.next().await {
         match result {

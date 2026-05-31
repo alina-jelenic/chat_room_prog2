@@ -23,4 +23,8 @@ impl Soba {
     pub fn dodaj_sporocilo(&mut self, msg: Message) {
         self.history.push(msg);
     }
+
+    pub fn odstrani_uporabnika(&mut self, user_id: u64) {
+    self.users.retain(|u| u.id != user_id);
+}
 }

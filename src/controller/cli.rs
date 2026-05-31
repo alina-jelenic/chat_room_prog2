@@ -1,4 +1,4 @@
-use crate::controller::tipi::{Connection, ServerState, SharedState};
+use crate::controller::tipi::{Connection, SharedState};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -50,8 +50,10 @@ impl Connection<TcpStream> {
                 msg = rx.recv() => {
                     match msg {
                         Ok(message) => {
-                            if writer.write_all(format!("{message}\n").as_bytes()).await.is_err() {
-                                break;
+                            if !message.starts_with(&format!("{user}:")) {
+                                if writer.write_all(format!("{message}\n").as_bytes()).await.is_err() {
+                                    break;
+                                }
                             }
                         }
                         Err(_) => break,
