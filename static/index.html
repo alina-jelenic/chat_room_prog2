@@ -349,15 +349,22 @@
   </div>
 
   <div class="input-area">
+  <form
+    hx-post="/rooms/general/messages"
+    hx-target="#messages"
+    hx-swap="beforeend"
+    hx-on::after-request="this.reset()">
+
     <div class="input-row">
-      <textarea id="msg-input" rows="1"></textarea>
-      <button class="send-btn" onclick="sendMessage()" title="Send (Enter)">
+      <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…"></textarea>
+      <button type="submit" class="send-btn">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
         </svg>
       </button>
     </div>
-  </div>
+  </form>
+</div>
 </div>
 </body>
 </html>

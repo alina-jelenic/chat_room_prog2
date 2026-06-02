@@ -14,14 +14,14 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub async fn new(db: DatabaseConnection) -> Self {  
+        pub async fn new(db: DatabaseConnection) -> SharedState {
         let (tx, _) = broadcast::channel::<String>(64);
-        Self {
+        Arc::new(Mutex::new(Self {
             sobe: HashMap::new(),
             uporabniki: HashMap::new(),
             tx,
-            db, 
-        }
+            db,
+        }))
     }
     
 

@@ -5,12 +5,30 @@ use crate::controller::tipi::{ServerState, SharedState};
 use axum::{
     extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Query, State},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 // use std::sync::Arc;
+use tower_http::services::ServeDir;
+use axum::http::StatusCode;
+use crate::controller::forms::{login_handler, register_handler};
+
+pub struct AppError(pub String);
+impl axum::response::IntoResponse for AppError {
+    fn into_response(self) -> axum::response::Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.0).into_response()
+    }
+}
+
+impl<E: std::fmt::Display> From<E> for AppError {
+    fn from(e: E) -> Self {
+        AppError(e.to_string())
+    }
+}
+
+
 
 #[derive(Debug, Deserialize)]
 struct WsQuery {
@@ -22,6 +40,9 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/api/login", post(login_handler))
+        .route("/api/register", post(register_handler))
+        .nest_service("/api", ServeDir::new("static"))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
