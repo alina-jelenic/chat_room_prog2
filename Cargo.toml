@@ -14,6 +14,7 @@ futures-util = "0.3"
 tower-http = { version = "0.6", features = ["fs"] }
 argon2 = "0.5"
 rand = { version = "0.8", features = ["std"] }
+migration = { path = "migration" }
 
 [workspace]
 members = [".",

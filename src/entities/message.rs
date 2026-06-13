@@ -11,7 +11,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub content: String,
     pub timestamp: i64,
-    pub soba_id: String,
+    pub soba_id: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

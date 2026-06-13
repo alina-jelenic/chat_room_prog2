@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
         .alter_table(
             Table::alter()
                 .table(Message::Table)
-                .add_column(string(Message::SobaId))
+                .add_column(integer(Message::SobaId))
                 .to_owned(),
         )
         .await

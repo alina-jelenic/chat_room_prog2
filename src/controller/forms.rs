@@ -1,5 +1,5 @@
 //tukaj koda za obdelavo login in sign up
-use axum::{extract::{Form, State}, response::Html};
+use axum::{extract::{Form, State}, response::{Html, IntoResponse, Response}};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::Deserialize;
 use crate::entities::{client, prelude::Client};
@@ -26,29 +26,31 @@ pub struct RegisterForm {
 
 pub async fn login_handler(State(state): State<SharedState>,
     Form(form): Form<LoginForm>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError>{
     // obdelaj login formo
     let db = state.lock().map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?.db.clone();
     // poiščeš uporabnika v bazi in preveriš geslo
     let user = Client::find().filter(client::Column::Username.eq(&form.username)).one(&db).await?;
 
-    let html = match user {
-        None => {
-            r#"<div class="server-msg error">Napačno ime ali geslo.</div>"#.to_string()
-        }
+    match user {
+        None => Ok(Html(
+            r#"<div id="login-msg" class="server-msg error">Napačno ime ali geslo.</div>"#
+        ).into_response()),
         Some(u) => {
-            let is_correct = verify_password(&form.password, &u.geslo)
+            let ok = verify_password(&form.password, &u.geslo)
                 .map_err(|e| AppError(e))?;
-
-            if is_correct {
-                r#"<div class="server-msg success">Prijava uspešna!</div>"#.to_string()
+            if ok {
+                Ok((
+                    [("HX-Redirect", "/index.html")],
+                    Html(""),
+                ).into_response())
             } else {
-                r#"<div class="server-msg error">Napačno ime ali geslo.</div>"#.to_string()
+                Ok(Html(
+                    r#"<div id="login-msg" class="server-msg error">Napačno ime ali geslo.</div>"#
+                ).into_response())
             }
         }
-    };
-
-    Ok(Html(html))
+    }
     
 }
 

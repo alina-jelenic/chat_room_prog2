@@ -11,6 +11,7 @@ use sea_orm::{
 };
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
+use migration::{Migrator, MigratorTrait};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
@@ -41,7 +42,7 @@ pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppE
     // SQLite bazo brez ročnega pripravljanja tabel. Migracije so še vedno koristne, ampak za
     // primerjalni ZIP je bolj prijazno, da osnovna shema nastane sama.
     let backend = db.get_database_backend();
-
+    Migrator::up(db, None).await?;
     Ok(())
 }
 

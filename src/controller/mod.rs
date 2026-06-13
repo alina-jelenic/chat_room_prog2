@@ -2,6 +2,7 @@ pub mod cli;
 pub mod tipi;
 pub mod web;
 pub mod forms;
+pub mod rooms;
 
 // pub use cli::run_tcp;
 // pub use web::run_websocket;

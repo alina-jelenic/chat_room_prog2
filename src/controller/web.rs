@@ -14,7 +14,7 @@ use serde::Deserialize;
 use tower_http::services::ServeDir;
 use axum::http::StatusCode;
 use crate::controller::forms::{login_handler, register_handler};
-
+use crate::controller::rooms;
 pub struct AppError(pub String);
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
@@ -42,7 +42,10 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
         .route("/ws", get(ws_handler))
         .route("/api/login", post(login_handler))
         .route("/api/register", post(register_handler))
-        .nest_service("/api", ServeDir::new("static"))
+        .route("/rooms", get(rooms::list_rooms))
+        .route("/rooms/{name}/messages", get(rooms::list_messages))
+        .route("/rooms/{name}/messages", post(rooms::create_message))
+        .fallback_service(ServeDir::new("static"))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
