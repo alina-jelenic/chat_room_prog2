@@ -1,42 +1,36 @@
-use tokio::net::TcpListener;
-use std::sync::{Arc, Mutex};
 use sea_orm::Database;
+use std::env;
 
-use crate::controller::{tipi::{Connection, ServerState}, web::run_websocket};
+use crate::controller::{
+    rooms::{ensure_default_room, prepare_database_schema},
+    tipi::ServerState,
+    web::run_websocket,
+};
 
 mod controller;
 mod podatkovni_tipi;
 mod entities;
 
-
 #[tokio::main]
-async fn main(){
-    let db = Database::connect("sqlite://./chat.db?mode=rwc")
-        .await
-        .expect("Ne morem se povezati z bazo");
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Preberemo .env, če obstaja. To omogoča, da URL baze zamenjamo brez spremembe kode.
+    dotenvy::dotenv().ok();
 
-    //let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let database_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
+
+    let db = Database::connect(&database_url).await?;
+
+    // Ključni popravek: migracije morajo teči pred ServerState::new in pred zagonom routerja.
+    // S tem se tabele client, soba, message in seaql_migrations ustvarijo samodejno.
+    prepare_database_schema(&db).await?;
+
+    // Frontend privzeto odpre sobo #general, zato jo pripravimo že ob zagonu.
+    ensure_default_room(&db).await?;
+
     let state = ServerState::new(db).await;
 
-    // loop{
-    //     // socket - stream kjer se pogovarjal, addr - moj naslov
-    //     let (socket, addr) = listener.accept().await?;
-    //     // kloniramo naš state
-    //     let state = Arc::clone(&state);
+    run_websocket(state).await?;
 
-    //     let username = addr.to_string();
-    //     let conn = Connection::new(username, socket, state);
-
-    //     tokio::spawn(async move {
-    //         conn.handle().await;
-    //     });
-
-    // }
-
-    // zagnemo websocket strežnik
-    // preveri če jevredu error handling
-    if let Err(e) = run_websocket(state).await{
-        eprintln!("Napaka pri zagonu websocket strežnika: {}", e);
-    }
-
+    Ok(())
 }

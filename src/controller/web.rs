@@ -15,15 +15,37 @@ use tower_http::services::ServeDir;
 use axum::http::StatusCode;
 use crate::controller::forms::{login_handler, register_handler};
 use crate::controller::rooms;
+#[derive(Debug)]
 pub struct AppError(pub String);
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for AppError {}
+
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::INTERNAL_SERVER_ERROR, self.0).into_response()
     }
 }
 
-impl<E: std::fmt::Display> From<E> for AppError {
-    fn from(e: E) -> Self {
+impl From<sea_orm::DbErr> for AppError {
+    fn from(e: sea_orm::DbErr) -> Self {
+        AppError(e.to_string())
+    }
+}
+
+impl From<String> for AppError {
+    fn from(e: String) -> Self {
+        AppError(e)
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(e: &str) -> Self {
         AppError(e.to_string())
     }
 }
@@ -42,7 +64,7 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
         .route("/ws", get(ws_handler))
         .route("/api/login", post(login_handler))
         .route("/api/register", post(register_handler))
-        .route("/rooms", get(rooms::list_rooms))
+        .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
         .route("/rooms/{name}/messages", get(rooms::list_messages))
         .route("/rooms/{name}/messages", post(rooms::create_message))
         .fallback_service(ServeDir::new("static"))

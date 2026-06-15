@@ -7,7 +7,7 @@ use axum::{
     response::Html,
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set, Statement,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,10 +38,9 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
 
 
 pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppError> {
-    // To je praktična varovalka za razvojno verzijo projekta: aplikacija lahko zažene svežo
-    // SQLite bazo brez ročnega pripravljanja tabel. Migracije so še vedno koristne, ampak za
-    // primerjalni ZIP je bolj prijazno, da osnovna shema nastane sama.
-    let backend = db.get_database_backend();
+    // Migrator::up izvede samo migracije, ki še niso zapisane v seaql_migrations.
+    // Zato je varno klicati to funkcijo ob vsakem startu aplikacije.
+    // Na sveži SQLite bazi se s tem samodejno ustvarijo vse potrebne tabele.
     Migrator::up(db, None).await?;
     Ok(())
 }
