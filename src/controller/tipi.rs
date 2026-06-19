@@ -9,17 +9,27 @@ pub type SharedState = Arc<Mutex<ServerState>>;
 pub struct ServerState {
     pub sobe: HashMap<String, Soba>,
     pub uporabniki: HashMap<u64, Client>,
-    pub tx: broadcast::Sender<String>,
+    pub soba_tx: HashMap<i32, broadcast::Sender<String>>,
     pub db: DatabaseConnection,
 }
 
 impl ServerState {
+
+        pub fn get_or_create_room_tx(&mut self, soba_id: i32) -> broadcast::Sender<String> {
+        self.soba_tx
+        .entry(soba_id)
+        .or_insert_with(|| {
+            let (tx, _) = broadcast::channel::<String>(64);
+            tx
+        })
+        .clone()
+}
         pub async fn new(db: DatabaseConnection) -> SharedState {
         let (tx, _) = broadcast::channel::<String>(64);
         Arc::new(Mutex::new(Self {
             sobe: HashMap::new(),
             uporabniki: HashMap::new(),
-            tx,
+            soba_tx: HashMap::new(),
             db,
         }))
     }
@@ -46,7 +56,7 @@ impl ServerState {
         Self {
             sobe: HashMap::new(),
             uporabniki: HashMap::new(),
-            tx,
+            soba_tx: HashMap::new(),
             db,
         }
 }

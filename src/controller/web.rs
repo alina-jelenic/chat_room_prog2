@@ -55,6 +55,7 @@ impl From<&str> for AppError {
 #[derive(Debug, Deserialize)]
 struct WsQuery {
     username: Option<String>,
+    room_id: Option<i32>,
 }
 
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
@@ -87,13 +88,14 @@ async fn ws_handler(
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| "gost".to_string());
 
-    ws.on_upgrade(move |socket| handle_socket(socket, username, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, username, state, query.room_id))
 }
 
-async fn handle_socket(socket: WebSocket, username: String, state: SharedState) {
+async fn handle_socket(socket: WebSocket, username: String, state: SharedState, room_id: Option<i32>) {
     let (tx, mut rx) = {
-        let state = state.lock().unwrap();
-        (state.tx.clone(), state.tx.subscribe())
+        let mut state = state.lock().unwrap();
+        let tx = state.get_or_create_room_tx(room_id.unwrap_or(0));
+        (tx.clone(), tx.subscribe())
     };
 
     let (mut sender, mut receiver) = socket.split();

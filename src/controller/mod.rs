@@ -1,4 +1,4 @@
-pub mod cli;
+//pub mod cli;
 pub mod tipi;
 pub mod web;
 pub mod forms;

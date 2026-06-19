@@ -63,7 +63,11 @@ async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba:
         return Ok(room);
     }
 
+    use rand::Rng;
+    let code = rand::thread_rng().gen_range(100000..=999999);
+
     let room = soba::ActiveModel {
+        id: Set(code),
         name: Set(clean_name),
         ..Default::default()
     }
@@ -111,7 +115,8 @@ pub async fn list_rooms(State(state): State<SharedState>) -> Result<Html<String>
     let mut html = String::new();
     for room in rooms {
         html.push_str(&format!(
-            r##"<button class="room-item" hx-get="/rooms/{name}/messages" hx-target="#messages" hx-swap="innerHTML" onclick="document.getElementById('room-title').textContent='{name}'"># {name}</button>"##,
+            r##"<button class="room-item" data-room-id="{id}" hx-get="/rooms/{name}/messages" ...># {name}</button>"##,
+            id = room.id,
             name = html_escape(&room.name)
         ));
     }

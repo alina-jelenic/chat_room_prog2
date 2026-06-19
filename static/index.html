@@ -107,7 +107,7 @@
       user-select: none;
     }
 
-    .room-item::before { content: '#'; font-size: .75rem; color: #5a5550; }
+    .room-item::before { content: ''; font-size: .75rem; color: #5a5550; }
 
     .room-item:hover   { background: rgba(255,255,255,.05); color: #d0cbc4; }
     .room-item.active  { background: rgba(255,255,255,.08); color: #fff; }
@@ -343,7 +343,10 @@
     <span class="connection-label" id="conn-label">connecting</span>
   </div>
 
-  <div class="messages" id="messages">
+  <div class="messages" id="messages"
+    hx-get="/rooms/general/messages"
+    hx-trigger="every 2s"
+    hx-swap="innerHTML">
     <div class="date-sep">Today</div>
     <div class="sys-msg">Welcome to #<span id="welcome-room">general</span></div>
   </div>
@@ -367,5 +370,15 @@
   </form>
 </div>
 </div>
+
+<!-- tukaj more bit javascript ker ne gre oz ne znam s htmx narediti tega -->
+<script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
+<script>
+function switchRoom(name) {
+    const div = document.getElementById('messages');
+    div.setAttribute('hx-get', `/rooms/${name}/messages`);
+    htmx.process(div);
+}
+</script>
 </body>
 </html>
