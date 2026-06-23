@@ -319,6 +319,25 @@
   </div>
 
   <div class="section-label">Rooms</div>
+    <form
+      id="create-room-form"
+      hx-post="/rooms"
+      hx-target="#room-list"
+      hx-swap="beforeend">
+      <input
+          type="text"
+          name="name"
+          placeholder="Ime sobe"
+          required>
+      <button type="submit">
+          Ustvari sobo
+      </button>
+    </form>
+  <div id="room-list"
+    hx-get="/rooms"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+  </div>
   <div class="room-list"
      id="room-list"
      hx-get="/rooms"

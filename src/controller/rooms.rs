@@ -132,9 +132,18 @@ pub async fn create_room(
     let room = ensure_room_exists(&db, &form.name).await?;
 
     Ok(Html(format!(
-        r##"<button class="room-item" hx-get="/rooms/{name}/messages" hx-target="#messages" hx-swap="innerHTML" onclick="document.getElementById('room-title').textContent='{name}'"># {name}</button>"##,
-        name = html_escape(&room.name)
-    )))
+r##"
+<button
+    class="room-item"
+    data-room-id="{id}"
+    hx-get="/rooms/{name}/messages"
+    hx-target="#messages"
+    hx-swap="innerHTML">
+    # {name}
+</button>
+"##, id = room.id,
+name = html_escape(&room.name)
+)))
 }
 
 pub async fn list_messages(
