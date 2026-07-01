@@ -114,11 +114,7 @@ pub async fn list_rooms(State(state): State<SharedState>) -> Result<Html<String>
     // Če kasneje preidete na čist JS/JSON, lahko ta handler enostavno zamenjamo z Json<Vec<...>>.
     let mut html = String::new();
     for room in rooms {
-        html.push_str(&format!(
-            r##"<button class="room-item" data-room-id="{id}" hx-get="/rooms/{name}/messages" ...># {name}</button>"##,
-            id = room.id,
-            name = html_escape(&room.name)
-        ));
+        html.push_str(&render_room_button(&room, room.name == "general"));
     }
 
     Ok(Html(html))
@@ -131,19 +127,7 @@ pub async fn create_room(
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &form.name).await?;
 
-    Ok(Html(format!(
-r##"
-<button
-    class="room-item"
-    data-room-id="{id}"
-    hx-get="/rooms/{name}/messages"
-    hx-target="#messages"
-    hx-swap="innerHTML">
-    # {name}
-</button>
-"##, id = room.id,
-name = html_escape(&room.name)
-)))
+    Ok(Html(render_room_button(&room, false)))
 }
 
 pub async fn list_messages(
@@ -227,6 +211,33 @@ fn render_message(msg: &message::Model, username_hint: Option<&str>) -> String {
         r#"<div class="msg"><strong>{}</strong>: {}</div>"#,
         html_escape(sender),
         html_escape(&msg.content)
+    )
+}
+
+fn render_room_button(room: &soba::Model, active: bool) -> String {
+    let active_class = if active { " active" } else { "" };
+    let pressed = if active { "true" } else { "false" };
+    let name = html_escape(&room.name);
+
+    format!(
+        r##"
+<button
+    type="button"
+    class="room-item{active_class}"
+    data-room-id="{id}"
+    data-room-name="{name}"
+    aria-pressed="{pressed}"
+    hx-get="/rooms/{name}/messages"
+    hx-target="#messages"
+    hx-swap="innerHTML"
+    onclick="switchRoom('{name}', {id}, this)">
+    # {name}
+</button>
+"##,
+        active_class = active_class,
+        id = room.id,
+        name = name,
+        pressed = pressed,
     )
 }
 

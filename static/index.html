@@ -333,11 +333,6 @@
           Ustvari sobo
       </button>
     </form>
-  <div id="room-list"
-    hx-get="/rooms"
-    hx-trigger="load"
-    hx-swap="innerHTML">
-  </div>
   <div class="room-list"
      id="room-list"
      hx-get="/rooms"
@@ -373,6 +368,8 @@
   <div class="input-area">
   <form
     id="msg-form"
+    action="/rooms/general/messages"
+    method="post"
     hx-post="/rooms/general/messages"
     hx-target="#messages"
     hx-swap="beforeend"
@@ -393,11 +390,148 @@
 <!-- tukaj more bit javascript ker ne gre oz ne znam s htmx narediti tega -->
 <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
 <script>
-function switchRoom(name) {
-    const div = document.getElementById('messages');
-    div.setAttribute('hx-get', `/rooms/${name}/messages`);
-    htmx.process(div);
+let activeRoomName = 'general';
+let activeRoomId = null;
+let chatSocket = null;
+let websocketVersion = 0;
+
+function roomPath(name) {
+    return encodeURIComponent(name);
 }
+
+function setConnectionStatus(status, text) {
+    const dot = document.getElementById('conn-dot');
+    const label = document.getElementById('conn-label');
+    const banner = document.getElementById('offline-banner');
+
+    dot.classList.toggle('connected', status === 'connected');
+    label.textContent = text;
+    banner.style.display = status === 'disconnected' ? 'block' : 'none';
+}
+
+function appendSocketMessage(text) {
+    const messages = document.getElementById('messages');
+    const line = document.createElement('div');
+    line.className = text.startsWith('***') ? 'sys-msg' : 'msg';
+    line.textContent = text;
+    messages.appendChild(line);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function connectWebSocket(roomName, roomId) {
+    websocketVersion += 1;
+    const thisVersion = websocketVersion;
+
+    if (chatSocket) {
+        chatSocket.onclose = null;
+        chatSocket.close();
+        chatSocket = null;
+    }
+
+    if (!roomId) {
+        setConnectionStatus('disconnected', 'no room id');
+        return;
+    }
+
+    setConnectionStatus('connecting', `connecting to #${roomName}`);
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const username = localStorage.getItem('chat_username') || 'gost';
+    const url = `${protocol}//${window.location.host}/ws?username=${encodeURIComponent(username)}&room_id=${roomId}`;
+
+    chatSocket = new WebSocket(url);
+
+    chatSocket.onopen = () => {
+        if (thisVersion === websocketVersion) {
+            setConnectionStatus('connected', `connected to #${roomName}`);
+        }
+    };
+
+    chatSocket.onmessage = (event) => {
+        if (thisVersion === websocketVersion) {
+            appendSocketMessage(event.data);
+        }
+    };
+
+    chatSocket.onerror = () => {
+        if (thisVersion === websocketVersion) {
+            setConnectionStatus('disconnected', 'connection error');
+        }
+    };
+
+    chatSocket.onclose = () => {
+        if (thisVersion === websocketVersion) {
+            setConnectionStatus('disconnected', 'disconnected');
+        }
+    };
+}
+
+function setActiveRoom(name, roomId, button) {
+    activeRoomName = name;
+    activeRoomId = roomId;
+
+    document.getElementById('room-title').textContent = name;
+    document.getElementById('welcome-room').textContent = name;
+
+    document.querySelectorAll('#room-list .room-item').forEach((item) => {
+        item.classList.remove('active');
+        item.setAttribute('aria-pressed', 'false');
+    });
+
+    if (!button && roomId) {
+        button = document.querySelector(`#room-list .room-item[data-room-id="${roomId}"]`);
+    }
+
+    if (button) {
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+    }
+
+    const messages = document.getElementById('messages');
+    const form = document.getElementById('msg-form');
+    const url = `/rooms/${roomPath(name)}/messages`;
+
+    messages.setAttribute('hx-get', url);
+    form.setAttribute('hx-post', url);
+    form.setAttribute('action', url);
+
+    htmx.process(messages);
+    htmx.process(form);
+
+    connectWebSocket(name, roomId);
+}
+
+function switchRoom(name, roomId, button) {
+    setActiveRoom(name, roomId, button);
+}
+
+function initRoomList() {
+    const buttons = document.querySelectorAll('#room-list .room-item');
+    if (!buttons.length) return;
+
+    let button = document.querySelector('#room-list .room-item.active') || buttons[0];
+    const name = button.dataset.roomName || button.textContent.replace(/^#\s*/, '').trim();
+    const roomId = Number(button.dataset.roomId);
+
+    setActiveRoom(name, roomId, button);
+}
+
+function logout() {
+    if (chatSocket) {
+        chatSocket.close();
+    }
+    window.location.href = '/authorisation.html';
+}
+
+document.body.addEventListener('htmx:afterSwap', (event) => {
+    if (event.target && event.target.id === 'room-list') {
+        initRoomList();
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    setConnectionStatus('connecting', 'connecting');
+});
 </script>
 </body>
 </html>
