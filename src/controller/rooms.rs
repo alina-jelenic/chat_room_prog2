@@ -12,6 +12,7 @@ use sea_orm::{
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use migration::{Migrator, MigratorTrait};
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
@@ -145,6 +146,21 @@ pub async fn list_messages(
 
     let mut html = String::from(r#"<div class="date-sep">Today</div>"#);
 
+    let sender_ids: Vec<i64> = messages
+        .iter()
+        .filter_map(|msg| msg.sender_id)
+        .collect();
+
+    let clients = Client::find()
+        .filter(client::Column::Id.is_in(sender_ids))
+        .all(&db)
+        .await?;
+
+    let sender_map: HashMap<i64, String> = clients
+        .into_iter()
+        .map(|client| (client.id as i64, client.username))
+        .collect();
+
     if messages.is_empty() {
         html.push_str(&format!(
             r#"<div class="sys-msg">Dobrodošla v #{}</div>"#,
@@ -153,7 +169,10 @@ pub async fn list_messages(
     }
 
     for msg in messages {
-        html.push_str(&render_message(&msg, None));
+        let sender_name = msg.sender_id
+            .and_then(|id| sender_map.get(&id))
+            .map(String::as_str);
+        html.push_str(&render_message(&msg, sender_name));
     }
 
     Ok(Html(html))
@@ -201,8 +220,8 @@ fn current_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
-fn render_message(msg: &message::Model, username_hint: Option<&str>) -> String {
-    let sender = username_hint
+fn render_message(msg: &message::Model, sender_name: Option<&str>) -> String {
+    let sender = sender_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unwrap_or("gost");
