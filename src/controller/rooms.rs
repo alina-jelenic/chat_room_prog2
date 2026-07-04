@@ -13,6 +13,7 @@ use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use migration::{Migrator, MigratorTrait};
 use std::collections::HashMap;
+use chrono::{Utc, TimeZone, DateTime};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
@@ -144,7 +145,9 @@ pub async fn list_messages(
         .all(&db)
         .await?;
 
-    let mut html = String::from(r#"<div class="date-sep">Today</div>"#);
+    let mut html = String::new();
+    let mut last_date = String::new();
+
 
     let sender_ids: Vec<i64> = messages
         .iter()
@@ -172,8 +175,25 @@ pub async fn list_messages(
         let sender_name = msg.sender_id
             .and_then(|id| sender_map.get(&id))
             .map(String::as_str);
-        html.push_str(&render_message(&msg, sender_name));
+
+        // izračuna datum tega sporočila
+        let date_str = DateTime::from_timestamp(msg.timestamp, 0)
+            .map(|dt| dt.format("%d. %m. %Y").to_string())
+            .unwrap_or_else(|| "neznan datum".to_string());
+
+        // izpiše datum samo če je datum drugačen od prejšnjega
+        if date_str != last_date {
+            html.push_str(&format!(
+                r#"<div class="date-sep">{}</div>"#,
+                date_str
+            ));
+            last_date = date_str;
+        }
+
+        html.push_str(&render_message(&msg, sender_name, msg.timestamp));
     }
+
+
 
     Ok(Html(html))
 }
@@ -210,7 +230,7 @@ pub async fn create_message(
     .insert(&db)
     .await?;
 
-    Ok(Html(render_message(&msg, form.username.as_deref())))
+    Ok(Html(render_message(&msg, form.username.as_deref(), msg.timestamp)))
 }
 
 fn current_timestamp() -> i64 {
@@ -220,15 +240,22 @@ fn current_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
-fn render_message(msg: &message::Model, sender_name: Option<&str>) -> String {
+fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
     let sender = sender_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unwrap_or("gost");
 
+    let time_str = Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .map(|dt| dt.format("%H:%M").to_string())
+        .unwrap_or_else(|| "??:??".to_string());
+
     format!(
-        r#"<div class="msg"><strong>{}</strong>: {}</div>"#,
+        r#"<div class="msg"><strong>{}</strong> <span class="time">{}</span>: {}</div>"#,
         html_escape(sender),
+        time_str,
         html_escape(&msg.content)
     )
 }
