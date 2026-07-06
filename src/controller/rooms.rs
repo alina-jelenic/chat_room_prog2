@@ -1,19 +1,19 @@
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
-use crate::entities::{client, message, soba};
 use crate::entities::prelude::{Client, Message, Soba};
+use crate::entities::{client, message, soba};
 use axum::{
     extract::{Form, Path, State},
     response::Html,
 };
+use chrono::{DateTime, TimeZone, Utc};
+use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::Deserialize;
-use std::time::{SystemTime, UNIX_EPOCH};
-use migration::{Migrator, MigratorTrait};
 use std::collections::HashMap;
-use chrono::{Utc, TimeZone, DateTime};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
@@ -38,7 +38,6 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
         .clone())
 }
 
-
 pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppError> {
     // Migrator::up izvede samo migracije, ki še niso zapisane v seaql_migrations.
     // Zato je varno klicati to funkcijo ob vsakem startu aplikacije.
@@ -52,6 +51,13 @@ pub async fn ensure_default_room(db: &DatabaseConnection) -> Result<(), AppError
     // Zato jo ustvarimo ob zagonu, če še ne obstaja.
     ensure_room_exists(db, "general").await?;
     Ok(())
+}
+
+pub async fn ensure_room_for_websocket(
+    db: &DatabaseConnection,
+    name: &str,
+) -> Result<soba::Model, AppError> {
+    ensure_room_exists(db, name).await
 }
 
 async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba::Model, AppError> {
@@ -107,19 +113,7 @@ pub async fn list_rooms(State(state): State<SharedState>) -> Result<Html<String>
     let db = db_from_state(&state)?;
     ensure_default_room(&db).await?;
 
-    let rooms = Soba::find()
-        .order_by_asc(soba::Column::Name)
-        .all(&db)
-        .await?;
-
-    // Vračamo HTML, ker trenutni frontend uporablja HTMX in hx-swap.
-    // Če kasneje preidete na čist JS/JSON, lahko ta handler enostavno zamenjamo z Json<Vec<...>>.
-    let mut html = String::new();
-    for room in rooms {
-        html.push_str(&render_room_button(&room, room.name == "general"));
-    }
-
-    Ok(Html(html))
+    Ok(Html(render_room_list(&db, "general").await?))
 }
 
 pub async fn create_room(
@@ -132,6 +126,24 @@ pub async fn create_room(
     Ok(Html(render_room_button(&room, false)))
 }
 
+pub async fn room_panel(
+    State(state): State<SharedState>,
+    Path(room_name): Path<String>,
+) -> Result<Html<String>, AppError> {
+    let db = db_from_state(&state)?;
+    let room = ensure_room_exists(&db, &room_name).await?;
+
+    let mut html = render_chat_panel(&room);
+
+    // Ko uporabnik zamenja sobo, hkrati posodobimo še aktiven gumb v seznamu sob.
+    html.push_str(&format!(
+        r#"<div id="room-list" hx-swap-oob="innerHTML">{}</div>"#,
+        render_room_list(&db, &room.name).await?
+    ));
+
+    Ok(Html(html))
+}
+
 pub async fn list_messages(
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
@@ -139,63 +151,7 @@ pub async fn list_messages(
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &room_name).await?;
 
-    let messages = Message::find()
-        .filter(message::Column::SobaId.eq(room.id))
-        .order_by_asc(message::Column::Timestamp)
-        .all(&db)
-        .await?;
-
-    let mut html = String::new();
-    let mut last_date = String::new();
-
-
-    let sender_ids: Vec<i64> = messages
-        .iter()
-        .filter_map(|msg| msg.sender_id)
-        .collect();
-
-    let clients = Client::find()
-        .filter(client::Column::Id.is_in(sender_ids))
-        .all(&db)
-        .await?;
-
-    let sender_map: HashMap<i64, String> = clients
-        .into_iter()
-        .map(|client| (client.id as i64, client.username))
-        .collect();
-
-    if messages.is_empty() {
-        html.push_str(&format!(
-            r#"<div class="sys-msg">Dobrodošla v #{}</div>"#,
-            html_escape(&room.name)
-        ));
-    }
-
-    for msg in messages {
-        let sender_name = msg.sender_id
-            .and_then(|id| sender_map.get(&id))
-            .map(String::as_str);
-
-        // izračuna datum tega sporočila
-        let date_str = DateTime::from_timestamp(msg.timestamp, 0)
-            .map(|dt| dt.format("%d. %m. %Y").to_string())
-            .unwrap_or_else(|| "neznan datum".to_string());
-
-        // izpiše datum samo če je datum drugačen od prejšnjega
-        if date_str != last_date {
-            html.push_str(&format!(
-                r#"<div class="date-sep">{}</div>"#,
-                date_str
-            ));
-            last_date = date_str;
-        }
-
-        html.push_str(&render_message(&msg, sender_name, msg.timestamp));
-    }
-
-
-
-    Ok(Html(html))
+    Ok(Html(render_messages_for_room(&db, &room).await?))
 }
 
 pub async fn create_message(
@@ -210,11 +166,106 @@ pub async fn create_message(
 
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &room_name).await?;
+    let msg = insert_message(&db, room.id, form.username.as_deref(), content).await?;
 
-    let sender_id = match form.username.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+    Ok(Html(render_message(&msg, form.username.as_deref(), msg.timestamp)))
+}
+
+pub async fn create_websocket_message(
+    db: &DatabaseConnection,
+    room_id: i32,
+    username: &str,
+    content: &str,
+) -> Result<String, AppError> {
+    let content = content.trim();
+    if content.is_empty() {
+        return Ok(String::new());
+    }
+
+    let msg = insert_message(db, room_id, Some(username), content).await?;
+    Ok(render_message_oob(&msg, Some(username), msg.timestamp))
+}
+
+async fn render_room_list(
+    db: &DatabaseConnection,
+    active_room_name: &str,
+) -> Result<String, AppError> {
+    let rooms = Soba::find()
+        .order_by_asc(soba::Column::Name)
+        .all(db)
+        .await?;
+
+    let mut html = String::new();
+    for room in rooms {
+        html.push_str(&render_room_button(&room, room.name == active_room_name));
+    }
+
+    Ok(html)
+}
+
+async fn render_messages_for_room(
+    db: &DatabaseConnection,
+    room: &soba::Model,
+) -> Result<String, AppError> {
+    let messages = Message::find()
+        .filter(message::Column::SobaId.eq(room.id))
+        .order_by_asc(message::Column::Timestamp)
+        .all(db)
+        .await?;
+
+    let sender_ids: Vec<i64> = messages.iter().filter_map(|msg| msg.sender_id).collect();
+
+    let clients = Client::find()
+        .filter(client::Column::Id.is_in(sender_ids))
+        .all(db)
+        .await?;
+
+    let sender_map: HashMap<i64, String> = clients
+        .into_iter()
+        .map(|client| (client.id as i64, client.username))
+        .collect();
+
+    let mut html = String::new();
+    let mut last_date = String::new();
+
+    if messages.is_empty() {
+        html.push_str(&format!(
+            r#"<div class="sys-msg">Dobrodošla v #{}</div>"#,
+            html_escape(&room.name)
+        ));
+    }
+
+    for msg in messages {
+        let sender_name = msg
+            .sender_id
+            .and_then(|id| sender_map.get(&id))
+            .map(String::as_str);
+
+        let date_str = DateTime::from_timestamp(msg.timestamp, 0)
+            .map(|dt| dt.format("%d. %m. %Y").to_string())
+            .unwrap_or_else(|| "neznan datum".to_string());
+
+        if date_str != last_date {
+            html.push_str(&format!(r#"<div class="date-sep">{}</div>"#, date_str));
+            last_date = date_str;
+        }
+
+        html.push_str(&render_message(&msg, sender_name, msg.timestamp));
+    }
+
+    Ok(html)
+}
+
+async fn insert_message(
+    db: &DatabaseConnection,
+    room_id: i32,
+    username: Option<&str>,
+    content: &str,
+) -> Result<message::Model, AppError> {
+    let sender_id = match username.map(str::trim).filter(|u| !u.is_empty()) {
         Some(username) => Client::find()
             .filter(client::Column::Username.eq(username))
-            .one(&db)
+            .one(db)
             .await?
             .map(|user| user.id as i64),
         None => None,
@@ -224,13 +275,13 @@ pub async fn create_message(
         sender_id: Set(sender_id),
         content: Set(content.to_string()),
         timestamp: Set(current_timestamp()),
-        soba_id: Set(room.id),
+        soba_id: Set(room_id),
         ..Default::default()
     }
-    .insert(&db)
+    .insert(db)
     .await?;
 
-    Ok(Html(render_message(&msg, form.username.as_deref(), msg.timestamp)))
+    Ok(msg)
 }
 
 fn current_timestamp() -> i64 {
@@ -238,6 +289,46 @@ fn current_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn render_chat_panel(room: &soba::Model) -> String {
+    let name = html_escape(&room.name);
+
+    format!(
+        r##"
+<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name={name}&username=gost">
+  <div id="offline-banner">WebSocket povezava je aktivna za #{name}</div>
+
+  <div class="chat-header">
+    <span class="chat-header-hash">#</span>
+    <span class="chat-header-name" id="room-title">{name}</span>
+    <div class="connection-dot connected" id="conn-dot"></div>
+    <span class="connection-label" id="conn-label">websocket</span>
+  </div>
+
+  <div class="messages" id="messages"
+    hx-get="/rooms/{name}/messages"
+    hx-trigger="load"
+    hx-swap="innerHTML">
+    <div class="sys-msg">Nalaganje sporočil za #{name}…</div>
+  </div>
+
+  <div class="input-area">
+    <form id="msg-form" ws-send>
+      <div class="input-row">
+        <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…" required></textarea>
+        <button type="submit" class="send-btn" aria-label="Pošlji">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+"##,
+        name = name,
+    )
 }
 
 fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
@@ -260,6 +351,13 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
     )
 }
 
+fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
+    format!(
+        r#"<div id="messages" hx-swap-oob="beforeend">{}</div>"#,
+        render_message(msg, sender_name, timestamp)
+    )
+}
+
 fn render_room_button(room: &soba::Model, active: bool) -> String {
     let active_class = if active { " active" } else { "" };
     let pressed = if active { "true" } else { "false" };
@@ -273,10 +371,9 @@ fn render_room_button(room: &soba::Model, active: bool) -> String {
     data-room-id="{id}"
     data-room-name="{name}"
     aria-pressed="{pressed}"
-    hx-get="/rooms/{name}/messages"
-    hx-target="#messages"
-    hx-swap="innerHTML"
-    onclick="switchRoom('{name}', {id}, this)">
+    hx-get="/rooms/{name}/panel"
+    hx-target="#chat-panel"
+    hx-swap="outerHTML">
     # {name}
 </button>
 "##,

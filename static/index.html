@@ -125,6 +125,7 @@
       font-family: 'DM Sans', sans-serif;
       font-size: .78rem;
       padding: 0;
+      text-decoration: none;
       transition: color .2s;
     }
     .logout-btn:hover { color: #c8c3bc; }
@@ -314,7 +315,7 @@
     <div class="wordmark">ChatRoom</div>
     <div class="user-pill">
       <div class="avatar" id="user-avatar">?</div>
-      <span class="user-name" id="user-display">connecting…</span>
+      <span class="user-name" id="user-display">gost</span>
     </div>
   </div>
 
@@ -342,196 +343,43 @@
 
 
   <div class="sidebar-footer">
-    <button class="logout-btn" onclick="logout()">Sign out</button>
+    <a class="logout-btn" href="/authorisation.html">Sign out</a>
   </div>
 </aside>
 
 <!-- MAIN -->
-<div class="main">
-  <div id="offline-banner">⚠ Connection lost — trying to reconnect…</div>
+<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name=general&username=gost">
+  <div id="offline-banner">WebSocket povezava je aktivna za #general</div>
 
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">general</span>
-    <div class="connection-dot" id="conn-dot"></div>
-    <span class="connection-label" id="conn-label">connecting</span>
+    <div class="connection-dot connected" id="conn-dot"></div>
+    <span class="connection-label" id="conn-label">websocket</span>
   </div>
 
   <div class="messages" id="messages"
     hx-get="/rooms/general/messages"
-    hx-trigger="every 2s"
+    hx-trigger="load"
     hx-swap="innerHTML">
-    <div class="date-sep">Today</div>
-    <div class="sys-msg">Welcome to #<span id="welcome-room">general</span></div>
+    <div class="sys-msg">Nalaganje sporočil za #general…</div>
   </div>
 
   <div class="input-area">
-  <form
-    id="msg-form"
-    action="/rooms/general/messages"
-    method="post"
-    hx-post="/rooms/general/messages"
-    hx-target="#messages"
-    hx-swap="beforeend"
-    hx-on::after-request="this.reset()">
-
-    <div class="input-row">
-      <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…"></textarea>
-      <button type="submit" class="send-btn">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
-        </svg>
-      </button>
-    </div>
-  </form>
-</div>
+    <form id="msg-form" ws-send>
+      <div class="input-row">
+        <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…" required></textarea>
+        <button type="submit" class="send-btn" aria-label="Pošlji">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
 </div>
 
-<!-- tukaj more bit javascript ker ne gre oz ne znam s htmx narediti tega -->
 <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
-<script>
-let activeRoomName = 'general';
-let activeRoomId = null;
-let chatSocket = null;
-let websocketVersion = 0;
-
-function roomPath(name) {
-    return encodeURIComponent(name);
-}
-
-function setConnectionStatus(status, text) {
-    const dot = document.getElementById('conn-dot');
-    const label = document.getElementById('conn-label');
-    const banner = document.getElementById('offline-banner');
-
-    dot.classList.toggle('connected', status === 'connected');
-    label.textContent = text;
-    banner.style.display = status === 'disconnected' ? 'block' : 'none';
-}
-
-function appendSocketMessage(text) {
-    const messages = document.getElementById('messages');
-    const line = document.createElement('div');
-    line.className = text.startsWith('***') ? 'sys-msg' : 'msg';
-    line.textContent = text;
-    messages.appendChild(line);
-    messages.scrollTop = messages.scrollHeight;
-}
-
-function connectWebSocket(roomName, roomId) {
-    websocketVersion += 1;
-    const thisVersion = websocketVersion;
-
-    if (chatSocket) {
-        chatSocket.onclose = null;
-        chatSocket.close();
-        chatSocket = null;
-    }
-
-    if (!roomId) {
-        setConnectionStatus('disconnected', 'no room id');
-        return;
-    }
-
-    setConnectionStatus('connecting', `connecting to #${roomName}`);
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const username = localStorage.getItem('chat_username') || 'gost';
-    const url = `${protocol}//${window.location.host}/ws?username=${encodeURIComponent(username)}&room_id=${roomId}`;
-
-    chatSocket = new WebSocket(url);
-
-    chatSocket.onopen = () => {
-        if (thisVersion === websocketVersion) {
-            setConnectionStatus('connected', `connected to #${roomName}`);
-        }
-    };
-
-    chatSocket.onmessage = (event) => {
-        if (thisVersion === websocketVersion) {
-            appendSocketMessage(event.data);
-        }
-    };
-
-    chatSocket.onerror = () => {
-        if (thisVersion === websocketVersion) {
-            setConnectionStatus('disconnected', 'connection error');
-        }
-    };
-
-    chatSocket.onclose = () => {
-        if (thisVersion === websocketVersion) {
-            setConnectionStatus('disconnected', 'disconnected');
-        }
-    };
-}
-
-function setActiveRoom(name, roomId, button) {
-    activeRoomName = name;
-    activeRoomId = roomId;
-
-    document.getElementById('room-title').textContent = name;
-    document.getElementById('welcome-room').textContent = name;
-
-    document.querySelectorAll('#room-list .room-item').forEach((item) => {
-        item.classList.remove('active');
-        item.setAttribute('aria-pressed', 'false');
-    });
-
-    if (!button && roomId) {
-        button = document.querySelector(`#room-list .room-item[data-room-id="${roomId}"]`);
-    }
-
-    if (button) {
-        button.classList.add('active');
-        button.setAttribute('aria-pressed', 'true');
-    }
-
-    const messages = document.getElementById('messages');
-    const form = document.getElementById('msg-form');
-    const url = `/rooms/${roomPath(name)}/messages`;
-
-    messages.setAttribute('hx-get', url);
-    form.setAttribute('hx-post', url);
-    form.setAttribute('action', url);
-
-    htmx.process(messages);
-    htmx.process(form);
-
-    connectWebSocket(name, roomId);
-}
-
-function switchRoom(name, roomId, button) {
-    setActiveRoom(name, roomId, button);
-}
-
-function initRoomList() {
-    const buttons = document.querySelectorAll('#room-list .room-item');
-    if (!buttons.length) return;
-
-    let button = document.querySelector('#room-list .room-item.active') || buttons[0];
-    const name = button.dataset.roomName || button.textContent.replace(/^#\s*/, '').trim();
-    const roomId = Number(button.dataset.roomId);
-
-    setActiveRoom(name, roomId, button);
-}
-
-function logout() {
-    if (chatSocket) {
-        chatSocket.close();
-    }
-    window.location.href = '/authorisation.html';
-}
-
-document.body.addEventListener('htmx:afterSwap', (event) => {
-    if (event.target && event.target.id === 'room-list') {
-        initRoomList();
-    }
-});
-
-document.addEventListener('DOMContentLoaded', () => {
-    setConnectionStatus('connecting', 'connecting');
-});
-</script>
+<script src="https://unpkg.com/htmx-ext-ws@2.0.2/ws.js"></script>
 </body>
 </html>
