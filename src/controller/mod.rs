@@ -88,8 +88,6 @@ mod tests {
         let message = "*** 127.0.0.1:99999 se je pridružil ***".to_string();
         // system messages should always pass through
         assert!(!message.starts_with(&format!("{username}:")));
-    }
-
-
+    }    
 }
 // treba preveriti, kaj se zgodi če dod novo ime pod že znan id
