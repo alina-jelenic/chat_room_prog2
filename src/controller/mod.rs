@@ -1,4 +1,5 @@
 //pub mod cli;
+pub mod auth;
 pub mod tipi;
 pub mod web;
 pub mod forms;

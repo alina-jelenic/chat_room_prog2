@@ -25,7 +25,7 @@ impl ServerState {
         .clone()
 }
         pub async fn new(db: DatabaseConnection) -> SharedState {
-        let (tx, _) = broadcast::channel::<String>(64);
+        let (_tx, _) = broadcast::channel::<String>(64);
         Arc::new(Mutex::new(Self {
             sobe: HashMap::new(),
             uporabniki: HashMap::new(),
@@ -49,7 +49,7 @@ impl ServerState {
 
     #[cfg(test)]
     pub fn new_test() -> Self {
-        let (tx, _) = broadcast::channel::<String>(64);
+        let (_tx, _) = broadcast::channel::<String>(64);
         // ustvarimo dummy db connection za teste
         use sea_orm::{DatabaseBackend, MockDatabase};
         let db = MockDatabase::new(DatabaseBackend::Sqlite).into_connection();

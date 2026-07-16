@@ -1,11 +1,13 @@
+use crate::controller::auth::{require_auth, AuthUser};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, Message, Soba};
 use crate::entities::{client, message, soba};
 use axum::{
     extract::{Form, Path, State},
-    response::Html,
+    response::{Html, IntoResponse, Response},
 };
+use axum_extra::extract::cookie::CookieJar;
 use chrono::{DateTime, TimeZone, Utc};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
@@ -23,9 +25,6 @@ pub struct CreateRoomForm {
 #[derive(Debug, Deserialize)]
 pub struct CreateMessageForm {
     pub content: String,
-    // Zaenkrat username pride iz forme ali ga kasneje doda frontend iz prijave.
-    // Če ga ni, sporočilo shranimo brez sender_id, da endpoint ostane uporaben tudi za gosta.
-    pub username: Option<String>,
 }
 
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
@@ -109,27 +108,44 @@ fn normalize_room_name(name: &str) -> Result<String, AppError> {
     Ok(clean)
 }
 
-pub async fn list_rooms(State(state): State<SharedState>) -> Result<Html<String>, AppError> {
+pub async fn list_rooms(
+    jar: CookieJar,
+    State(state): State<SharedState>,
+) -> Result<Response, AppError> {
+    if let Err(response) = require_auth(&jar) {
+        return Ok(response);
+    }
+
     let db = db_from_state(&state)?;
     ensure_default_room(&db).await?;
 
-    Ok(Html(render_room_list(&db, "general").await?))
+    Ok(Html(render_room_list(&db, "general").await?).into_response())
 }
 
 pub async fn create_room(
+    jar: CookieJar,
     State(state): State<SharedState>,
     Form(form): Form<CreateRoomForm>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
+    if let Err(response) = require_auth(&jar) {
+        return Ok(response);
+    }
+
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &form.name).await?;
 
-    Ok(Html(render_room_button(&room, false)))
+    Ok(Html(render_room_button(&room, false)).into_response())
 }
 
 pub async fn room_panel(
+    jar: CookieJar,
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
+    if let Err(response) = require_auth(&jar) {
+        return Ok(response);
+    }
+
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &room_name).await?;
 
@@ -141,40 +157,51 @@ pub async fn room_panel(
         render_room_list(&db, &room.name).await?
     ));
 
-    Ok(Html(html))
+    Ok(Html(html).into_response())
 }
 
 pub async fn list_messages(
+    jar: CookieJar,
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
-) -> Result<Html<String>, AppError> {
-    let db = db_from_state(&state)?;
-    let room = ensure_room_exists(&db, &room_name).await?;
-
-    Ok(Html(render_messages_for_room(&db, &room).await?))
-}
-
-pub async fn create_message(
-    State(state): State<SharedState>,
-    Path(room_name): Path<String>,
-    Form(form): Form<CreateMessageForm>,
-) -> Result<Html<String>, AppError> {
-    let content = form.content.trim();
-    if content.is_empty() {
-        return Ok(Html(String::new()));
+) -> Result<Response, AppError> {
+    if let Err(response) = require_auth(&jar) {
+        return Ok(response);
     }
 
     let db = db_from_state(&state)?;
     let room = ensure_room_exists(&db, &room_name).await?;
-    let msg = insert_message(&db, room.id, form.username.as_deref(), content).await?;
 
-    Ok(Html(render_message(&msg, form.username.as_deref(), msg.timestamp)))
+    Ok(Html(render_messages_for_room(&db, &room).await?).into_response())
+}
+
+pub async fn create_message(
+    jar: CookieJar,
+    State(state): State<SharedState>,
+    Path(room_name): Path<String>,
+    Form(form): Form<CreateMessageForm>,
+) -> Result<Response, AppError> {
+    let user = match require_auth(&jar) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
+
+    let content = form.content.trim();
+    if content.is_empty() {
+        return Ok(Html(String::new()).into_response());
+    }
+
+    let db = db_from_state(&state)?;
+    let room = ensure_room_exists(&db, &room_name).await?;
+    let msg = insert_message(&db, room.id, Some(user.id as i64), content).await?;
+
+    Ok(Html(render_message(&msg, Some(&user.username), msg.timestamp)).into_response())
 }
 
 pub async fn create_websocket_message(
     db: &DatabaseConnection,
     room_id: i32,
-    username: &str,
+    user: &AuthUser,
     content: &str,
 ) -> Result<String, AppError> {
     let content = content.trim();
@@ -182,8 +209,8 @@ pub async fn create_websocket_message(
         return Ok(String::new());
     }
 
-    let msg = insert_message(db, room_id, Some(username), content).await?;
-    Ok(render_message_oob(&msg, Some(username), msg.timestamp))
+    let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
+    Ok(render_message_oob(&msg, Some(&user.username), msg.timestamp))
 }
 
 async fn render_room_list(
@@ -259,18 +286,9 @@ async fn render_messages_for_room(
 async fn insert_message(
     db: &DatabaseConnection,
     room_id: i32,
-    username: Option<&str>,
+    sender_id: Option<i64>,
     content: &str,
 ) -> Result<message::Model, AppError> {
-    let sender_id = match username.map(str::trim).filter(|u| !u.is_empty()) {
-        Some(username) => Client::find()
-            .filter(client::Column::Username.eq(username))
-            .one(db)
-            .await?
-            .map(|user| user.id as i64),
-        None => None,
-    };
-
     let msg = message::ActiveModel {
         sender_id: Set(sender_id),
         content: Set(content.to_string()),
@@ -296,7 +314,7 @@ fn render_chat_panel(room: &soba::Model) -> String {
 
     format!(
         r##"
-<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name={name}&username=gost">
+<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name={name}">
   <div id="offline-banner">WebSocket povezava je aktivna za #{name}</div>
 
   <div class="chat-header">
@@ -335,7 +353,7 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
     let sender = sender_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or("gost");
+        .unwrap_or("neznan uporabnik");
 
     let time_str = Utc
         .timestamp_opt(timestamp, 0)

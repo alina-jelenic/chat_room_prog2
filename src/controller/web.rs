@@ -1,6 +1,7 @@
 // router - dod uporabnikom, dod sob, navigiraš po straniš, naložiš sporočila itd
 // websocket - je pa samo za pogovor, da se komunikacija direklno pogovarja
 
+use crate::controller::auth::{auth_user_from_jar, unauthorized_response, AuthUser};
 use crate::controller::forms::{login_handler, register_handler};
 use crate::controller::rooms;
 use crate::controller::tipi::SharedState;
@@ -10,10 +11,11 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
+use axum_extra::extract::cookie::CookieJar;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
@@ -56,7 +58,6 @@ impl From<&str> for AppError {
 
 #[derive(Debug, Deserialize)]
 struct WsQuery {
-    username: Option<String>,
     room_name: Option<String>,
 }
 
@@ -68,7 +69,9 @@ struct WsIncomingMessage {
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/me", get(crate::controller::auth::me_handler))
         .route("/api/login", post(login_handler))
+        .route("/api/logout", post(crate::controller::auth::logout_handler))
         .route("/api/register", post(register_handler))
         .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
         .route("/rooms/{name}/panel", get(rooms::room_panel))
@@ -78,7 +81,7 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
-    println!("WebSocket chat posluša na ws://127.0.0.1:3000/ws?room_name=general&username=ime");
+    println!("WebSocket chat posluša na ws://127.0.0.1:3000/ws?room_name=general");
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -86,23 +89,25 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    jar: CookieJar,
     State(state): State<SharedState>,
     Query(query): Query<WsQuery>,
-) -> impl IntoResponse {
-    let username = query
-        .username
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| "gost".to_string());
+) -> Response {
+    let user = match auth_user_from_jar(&jar) {
+        Some(user) => user,
+        None => return unauthorized_response(),
+    };
 
     let room_name = query
         .room_name
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| "general".to_string());
 
-    ws.on_upgrade(move |socket| handle_socket(socket, username, room_name, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, user, room_name, state))
+        .into_response()
 }
 
-async fn handle_socket(socket: WebSocket, username: String, room_name: String, state: SharedState) {
+async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, state: SharedState) {
     let db = match db_from_state(&state) {
         Ok(db) => db,
         Err(_) => return,
@@ -136,7 +141,7 @@ async fn handle_socket(socket: WebSocket, username: String, room_name: String, s
         match result {
             Ok(Message::Text(text)) => {
                 if let Some(content) = websocket_content(&text) {
-                    match rooms::create_websocket_message(&db, room.id, &username, &content).await {
+                    match rooms::create_websocket_message(&db, room.id, &user, &content).await {
                         Ok(html) if !html.is_empty() => {
                             let _ = tx.send(html);
                         }

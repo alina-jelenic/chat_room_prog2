@@ -16,6 +16,9 @@ argon2 = "0.5"
 rand = { version = "0.8", features = ["std"] }
 migration = { path = "migration" }
 chrono = "0.4"
+jsonwebtoken = "9.3"
+axum-extra = { version = "0.10", features = ["cookie"] }
+time = "0.3"
 
 [workspace]
 members = [".",

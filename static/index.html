@@ -130,6 +130,14 @@
     }
     .logout-btn:hover { color: #c8c3bc; }
 
+    button.logout-btn {
+      background: none;
+      border: 0;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+
     /* ── MAIN ── */
     .main {
       flex: 1;
@@ -313,9 +321,9 @@
 <aside class="sidebar">
   <div class="sidebar-header">
     <div class="wordmark">ChatRoom</div>
-    <div class="user-pill">
+    <div class="user-pill" id="user-pill" hx-get="/me" hx-trigger="load" hx-swap="outerHTML">
       <div class="avatar" id="user-avatar">?</div>
-      <span class="user-name" id="user-display">gost</span>
+      <span class="user-name" id="user-display">Preverjam prijavo…</span>
     </div>
   </div>
 
@@ -343,12 +351,12 @@
 
 
   <div class="sidebar-footer">
-    <a class="logout-btn" href="/authorisation.html">Sign out</a>
+    <button class="logout-btn" type="button" hx-post="/api/logout">Sign out</button>
   </div>
 </aside>
 
 <!-- MAIN -->
-<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name=general&username=gost">
+<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name=general">
   <div id="offline-banner">WebSocket povezava je aktivna za #general</div>
 
   <div class="chat-header">
