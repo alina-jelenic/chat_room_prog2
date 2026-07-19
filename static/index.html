@@ -105,6 +105,11 @@
       border-radius: 0;
       transition: background .15s, color .15s;
       user-select: none;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      font-family: inherit;
+      text-align: left;
     }
 
     .room-item::before { content: ''; font-size: .75rem; color: #5a5550; }
@@ -170,6 +175,18 @@
       margin-left: auto;
       transition: background .4s;
     }
+
+    .delete-room-btn {
+      border: 1px solid #e3b8b8;
+      border-radius: 7px;
+      background: #fff5f5;
+      color: #9b3535;
+      padding: 6px 9px;
+      font: inherit;
+      font-size: .72rem;
+      cursor: pointer;
+    }
+    .delete-room-btn:hover { background: #fde8e8; }
     .connection-dot.connected { background: #4caf82; }
 
     .connection-label {
@@ -337,6 +354,8 @@
           type="text"
           name="name"
           placeholder="Ime sobe"
+          maxlength="32"
+          pattern="[A-Za-z0-9_-]+"
           required>
       <button type="submit">
           Ustvari sobo
@@ -356,35 +375,11 @@
 </aside>
 
 <!-- MAIN -->
-<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name=general">
-  <div id="offline-banner">WebSocket povezava je aktivna za #general</div>
-
-  <div class="chat-header">
-    <span class="chat-header-hash">#</span>
-    <span class="chat-header-name" id="room-title">general</span>
-    <div class="connection-dot connected" id="conn-dot"></div>
-    <span class="connection-label" id="conn-label">websocket</span>
-  </div>
-
-  <div class="messages" id="messages"
-    hx-get="/rooms/general/messages"
-    hx-trigger="load"
-    hx-swap="innerHTML">
-    <div class="sys-msg">Nalaganje sporočil za #general…</div>
-  </div>
-
-  <div class="input-area">
-    <form id="msg-form" ws-send>
-      <div class="input-row">
-        <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…" required></textarea>
-        <button type="submit" class="send-btn" aria-label="Pošlji">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </div>
-    </form>
-  </div>
+<div class="main" id="chat-panel"
+     hx-get="/rooms/general/panel"
+     hx-trigger="load"
+     hx-swap="outerHTML">
+  <div class="sys-msg">Nalaganje sobe #general…</div>
 </div>
 
 <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>

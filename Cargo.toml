@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-sea-orm = { version = "2.0.0-rc", features = [ "sqlx-sqlite", "runtime-tokio-native-tls", "macros", "mock" ] }
+sea-orm = { workspace = true, features = [ "sqlx-sqlite", "runtime-tokio-native-tls", "macros", "mock" ] }
 dotenvy = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -20,7 +20,15 @@ jsonwebtoken = "9.3"
 axum-extra = { version = "0.10", features = ["cookie"] }
 time = "0.3"
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.29"
+
 [workspace]
-members = [".",
-    "migration"
-]
+members = [".", "migration"]
+resolver = "2"
+
+[workspace.dependencies]
+# Glavni SeaORM paket in migracije sta pripeta na isto izdajo.
+sea-orm = "=2.0.0-rc.40"
+sea-orm-migration = "=2.0.0-rc.40"

@@ -128,7 +128,9 @@
       <div class="field">
         <label for="login-username">Username</label>
         <input id="login-username" name="username" type="text"
-               placeholder="your username" autocomplete="username" required>
+               placeholder="your username" autocomplete="username"
+               minlength="3" maxlength="24"
+               pattern="[A-Za-z][A-Za-z0-9_-]{2,23}" required>
       </div>
 
       <div class="field">
@@ -155,7 +157,11 @@
       <div class="field">
         <label for="reg-username">Username</label>
         <input id="reg-username" name="username" type="text"
-               placeholder="choose a username" autocomplete="username" required>
+               placeholder="choose a username" autocomplete="username"
+               minlength="3" maxlength="24"
+               pattern="[A-Za-z][A-Za-z0-9_-]{2,23}"
+               title="3–24 znakov; začni s črko, nato uporabi črke, številke, - ali _"
+               required>
       </div>
 
       <div class="field">

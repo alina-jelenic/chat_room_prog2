@@ -1,15 +1,11 @@
-use sea_orm::Database;
-use std::env;
-
-use crate::controller::{
+use chat_room_prog2::controller::{
+    auth::validate_jwt_secret,
     rooms::{ensure_default_room, prepare_database_schema},
     tipi::ServerState,
     web::run_websocket,
 };
-
-mod controller;
-mod podatkovni_tipi;
-mod entities;
+use sea_orm::Database;
+use std::env;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,6 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
+    let jwt_secret = env::var("JWT_SECRET")
+        .map_err(|_| "JWT_SECRET ni nastavljen. Kopiraj .env.example v .env.")?;
+    validate_jwt_secret(&jwt_secret)?;
 
     let db = Database::connect(&database_url).await?;
 
@@ -28,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Frontend privzeto odpre sobo #general, zato jo pripravimo že ob zagonu.
     ensure_default_room(&db).await?;
 
-    let state = ServerState::new(db).await;
+    let state = ServerState::new(db, jwt_secret);
 
     run_websocket(state).await?;
 

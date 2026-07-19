@@ -5,6 +5,7 @@ use crate::entities::prelude::{Client, Message, Soba};
 use crate::entities::{client, message, soba};
 use axum::{
     extract::{Form, Path, State},
+    http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
@@ -12,6 +13,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    TransactionTrait,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -22,10 +24,7 @@ pub struct CreateRoomForm {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateMessageForm {
-    pub content: String,
-}
+const MAX_MESSAGE_LENGTH: usize = 2000;
 
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
     // Pomembno: mutex držimo samo toliko časa, da kloniramo DatabaseConnection.
@@ -35,6 +34,15 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
         .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?
         .db
         .clone())
+}
+
+fn authenticated_user(jar: &CookieJar, state: &SharedState) -> Result<AuthUser, Response> {
+    let secret = match state.lock() {
+        Ok(state) => state.jwt_secret.clone(),
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    };
+
+    require_auth(jar, &secret)
 }
 
 pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppError> {
@@ -52,11 +60,15 @@ pub async fn ensure_default_room(db: &DatabaseConnection) -> Result<(), AppError
     Ok(())
 }
 
-pub async fn ensure_room_for_websocket(
+pub async fn room_for_websocket(
     db: &DatabaseConnection,
     name: &str,
-) -> Result<soba::Model, AppError> {
-    ensure_room_exists(db, name).await
+) -> Result<Option<soba::Model>, AppError> {
+    let clean_name = normalize_room_name(name)?;
+    Ok(Soba::find()
+        .filter(soba::Column::Name.eq(clean_name))
+        .one(db)
+        .await?)
 }
 
 async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba::Model, AppError> {
@@ -84,7 +96,7 @@ async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba:
     Ok(room)
 }
 
-fn normalize_room_name(name: &str) -> Result<String, AppError> {
+pub fn normalize_room_name(name: &str) -> Result<String, AppError> {
     let clean = name.trim().to_lowercase();
 
     if clean.is_empty() {
@@ -112,7 +124,7 @@ pub async fn list_rooms(
     jar: CookieJar,
     State(state): State<SharedState>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = require_auth(&jar) {
+    if let Err(response) = authenticated_user(&jar, &state) {
         return Ok(response);
     }
 
@@ -127,12 +139,17 @@ pub async fn create_room(
     State(state): State<SharedState>,
     Form(form): Form<CreateRoomForm>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = require_auth(&jar) {
+    if let Err(response) = authenticated_user(&jar, &state) {
         return Ok(response);
     }
 
     let db = db_from_state(&state)?;
-    let room = ensure_room_exists(&db, &form.name).await?;
+    let clean_name = normalize_room_name(&form.name)?;
+    if room_for_websocket(&db, &clean_name).await?.is_some() {
+        // Gumb za obstoječo sobo je že v seznamu, zato ga ne podvojimo.
+        return Ok(Html(String::new()).into_response());
+    }
+    let room = ensure_room_exists(&db, &clean_name).await?;
 
     Ok(Html(render_room_button(&room, false)).into_response())
 }
@@ -142,14 +159,24 @@ pub async fn room_panel(
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = require_auth(&jar) {
-        return Ok(response);
-    }
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
 
     let db = db_from_state(&state)?;
-    let room = ensure_room_exists(&db, &room_name).await?;
+    let room = match room_for_websocket(&db, &room_name).await? {
+        Some(room) => room,
+        None => {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                Html(r#"<div class="sys-msg">Soba ne obstaja.</div>"#),
+            )
+                .into_response())
+        }
+    };
 
-    let mut html = render_chat_panel(&room);
+    let mut html = render_chat_panel(&room, &user);
 
     // Ko uporabnik zamenja sobo, hkrati posodobimo še aktiven gumb v seznamu sob.
     html.push_str(&format!(
@@ -165,37 +192,57 @@ pub async fn list_messages(
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = require_auth(&jar) {
+    if let Err(response) = authenticated_user(&jar, &state) {
         return Ok(response);
     }
 
     let db = db_from_state(&state)?;
-    let room = ensure_room_exists(&db, &room_name).await?;
+    let room = match room_for_websocket(&db, &room_name).await? {
+        Some(room) => room,
+        None => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
 
     Ok(Html(render_messages_for_room(&db, &room).await?).into_response())
 }
 
-pub async fn create_message(
+pub async fn delete_room(
     jar: CookieJar,
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
-    Form(form): Form<CreateMessageForm>,
 ) -> Result<Response, AppError> {
-    let user = match require_auth(&jar) {
+    let user = match authenticated_user(&jar, &state) {
         Ok(user) => user,
         Err(response) => return Ok(response),
     };
 
-    let content = form.content.trim();
-    if content.is_empty() {
-        return Ok(Html(String::new()).into_response());
+    let clean_name = normalize_room_name(&room_name)?;
+    if clean_name == "general" {
+        return Ok((StatusCode::BAD_REQUEST, "Sobe general ni mogoče izbrisati.").into_response());
     }
 
     let db = db_from_state(&state)?;
-    let room = ensure_room_exists(&db, &room_name).await?;
-    let msg = insert_message(&db, room.id, Some(user.id as i64), content).await?;
+    let room = match room_for_websocket(&db, &clean_name).await? {
+        Some(room) => room,
+        None => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
 
-    Ok(Html(render_message(&msg, Some(&user.username), msg.timestamp)).into_response())
+    // Sporočila in sobo izbrišemo v isti transakciji, da v bazi ne more
+    // ostati napol izvedena operacija.
+    let transaction = db.begin().await?;
+    Message::delete_many()
+        .filter(message::Column::SobaId.eq(room.id))
+        .exec(&transaction)
+        .await?;
+    Soba::delete_by_id(room.id).exec(&transaction).await?;
+    transaction.commit().await?;
+
+    let general = ensure_room_exists(&db, "general").await?;
+    let room_list = render_room_list(&db, &general.name).await?;
+    notify_room_deleted(&state, room.id, &room.name, &room_list)?;
+
+    let mut html = render_chat_panel(&general, &user);
+    html.push_str(&render_room_list_oob(&room_list));
+    Ok(Html(html).into_response())
 }
 
 pub async fn create_websocket_message(
@@ -207,6 +254,11 @@ pub async fn create_websocket_message(
     let content = content.trim();
     if content.is_empty() {
         return Ok(String::new());
+    }
+    if content.chars().count() > MAX_MESSAGE_LENGTH {
+        return Err(AppError(format!(
+            "Sporočilo ima lahko največ {MAX_MESSAGE_LENGTH} znakov."
+        )));
     }
 
     let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
@@ -237,6 +289,7 @@ async fn render_messages_for_room(
     let messages = Message::find()
         .filter(message::Column::SobaId.eq(room.id))
         .order_by_asc(message::Column::Timestamp)
+        .order_by_asc(message::Column::Id)
         .all(db)
         .await?;
 
@@ -309,12 +362,29 @@ fn current_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
-fn render_chat_panel(room: &soba::Model) -> String {
+fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
     let name = html_escape(&room.name);
+    let username = html_escape(&user.username);
+    let delete_control = if room.name == "general" {
+        String::new()
+    } else {
+        format!(
+            r##"<button type="button" class="delete-room-btn"
+                hx-delete="/rooms/{name}"
+                hx-target="#chat-panel"
+                hx-swap="outerHTML"
+                hx-confirm="Ali res želiš izbrisati sobo #{name} in vsa njena sporočila?">
+              Izbriši sobo
+            </button>"##
+        )
+    };
 
     format!(
         r##"
-<div class="main" id="chat-panel" hx-ext="ws" ws-connect="/ws?room_name={name}">
+<div class="main" id="chat-panel"
+     data-current-user-id="{user_id}"
+     data-current-username="{username}"
+     hx-ext="ws" ws-connect="/ws?room_name={name}">
   <div id="offline-banner">WebSocket povezava je aktivna za #{name}</div>
 
   <div class="chat-header">
@@ -322,6 +392,7 @@ fn render_chat_panel(room: &soba::Model) -> String {
     <span class="chat-header-name" id="room-title">{name}</span>
     <div class="connection-dot connected" id="conn-dot"></div>
     <span class="connection-label" id="conn-label">websocket</span>
+    {delete_control}
   </div>
 
   <div class="messages" id="messages"
@@ -334,7 +405,7 @@ fn render_chat_panel(room: &soba::Model) -> String {
   <div class="input-area">
     <form id="msg-form" ws-send>
       <div class="input-row">
-        <textarea name="content" id="msg-input" rows="1" placeholder="Sporočilo…" required></textarea>
+        <textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required></textarea>
         <button type="submit" class="send-btn" aria-label="Pošlji">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
@@ -346,7 +417,49 @@ fn render_chat_panel(room: &soba::Model) -> String {
 </div>
 "##,
         name = name,
+        username = username,
+        user_id = user.id,
+        delete_control = delete_control,
+        max_message_length = MAX_MESSAGE_LENGTH,
     )
+}
+
+fn render_room_list_oob(room_list: &str) -> String {
+    format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)
+}
+
+fn notify_room_deleted(
+    state: &SharedState,
+    deleted_room_id: i32,
+    deleted_room_name: &str,
+    room_list: &str,
+) -> Result<(), AppError> {
+    let (deleted_room_sender, other_senders) = {
+        let mut state = state
+            .lock()
+            .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?;
+        let deleted = state.soba_tx.remove(&deleted_room_id);
+        let others = state.soba_tx.values().cloned().collect::<Vec<_>>();
+        (deleted, others)
+    };
+
+    let room_list_oob = render_room_list_oob(room_list);
+    for sender in other_senders {
+        let _ = sender.send(room_list_oob.clone());
+    }
+
+    if let Some(sender) = deleted_room_sender {
+        let deleted_name = html_escape(deleted_room_name);
+        let redirect_to_general = format!(
+            r##"<div class="main" id="chat-panel" hx-swap-oob="outerHTML"
+                 hx-get="/rooms/general/panel" hx-trigger="load" hx-swap="outerHTML">
+              <div class="sys-msg">Soba #{deleted_name} je bila izbrisana. Odpiram #general…</div>
+            </div>"##
+        );
+        let _ = sender.send(format!("{redirect_to_general}{room_list_oob}"));
+    }
+
+    Ok(())
 }
 
 fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {

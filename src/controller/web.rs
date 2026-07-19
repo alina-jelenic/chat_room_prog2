@@ -1,5 +1,5 @@
-// router - dod uporabnikom, dod sob, navigiraš po straniš, naložiš sporočila itd
-// websocket - je pa samo za pogovor, da se komunikacija direklno pogovarja
+// HTTP endpointi skrbijo za avtentikacijo, sobe in nalaganje zgodovine.
+// WebSocket povezava skrbi samo za realnočasovno izmenjavo sporočil.
 
 use crate::controller::auth::{auth_user_from_jar, unauthorized_response, AuthUser};
 use crate::controller::forms::{login_handler, register_handler};
@@ -19,6 +19,7 @@ use axum_extra::extract::cookie::CookieJar;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
+use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
 #[derive(Debug)]
@@ -67,18 +68,7 @@ struct WsIncomingMessage {
 }
 
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
-    let app = Router::new()
-        .route("/ws", get(ws_handler))
-        .route("/me", get(crate::controller::auth::me_handler))
-        .route("/api/login", post(login_handler))
-        .route("/api/logout", post(crate::controller::auth::logout_handler))
-        .route("/api/register", post(register_handler))
-        .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
-        .route("/rooms/{name}/panel", get(rooms::room_panel))
-        .route("/rooms/{name}/messages", get(rooms::list_messages))
-        .route("/rooms/{name}/messages", post(rooms::create_message))
-        .fallback_service(ServeDir::new("static"))
-        .with_state(state);
+    let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     println!("WebSocket chat posluša na ws://127.0.0.1:3000/ws?room_name=general");
@@ -87,13 +77,34 @@ pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
+/// Router je ločena funkcija, da ga lahko integracijski testi poženejo
+/// brez vezave na fiksna vrata 3000.
+pub fn build_router(state: SharedState) -> Router {
+    Router::new()
+        .route("/ws", get(ws_handler))
+        .route("/me", get(crate::controller::auth::me_handler))
+        .route("/api/login", post(login_handler))
+        .route("/api/logout", post(crate::controller::auth::logout_handler))
+        .route("/api/register", post(register_handler))
+        .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
+        .route("/rooms/{name}/panel", get(rooms::room_panel))
+        .route("/rooms/{name}/messages", get(rooms::list_messages))
+        .route("/rooms/{name}", axum::routing::delete(rooms::delete_room))
+        .fallback_service(ServeDir::new("static"))
+        .with_state(state)
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     jar: CookieJar,
     State(state): State<SharedState>,
     Query(query): Query<WsQuery>,
 ) -> Response {
-    let user = match auth_user_from_jar(&jar) {
+    let secret = match state.lock() {
+        Ok(state) => state.jwt_secret.clone(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let user = match auth_user_from_jar(&jar, &secret) {
         Some(user) => user,
         None => return unauthorized_response(),
     };
@@ -113,8 +124,9 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         Err(_) => return,
     };
 
-    let room = match rooms::ensure_room_for_websocket(&db, &room_name).await {
-        Ok(room) => room,
+    let room = match rooms::room_for_websocket(&db, &room_name).await {
+        Ok(Some(room)) => room,
+        Ok(None) => return,
         Err(_) => return,
     };
 
@@ -130,9 +142,15 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
     let (mut sender, mut receiver) = socket.split();
 
     let send_task = tokio::spawn(async move {
-        while let Ok(message) = rx.recv().await {
-            if sender.send(Message::Text(message.into())).await.is_err() {
-                break;
+        loop {
+            match rx.recv().await {
+                Ok(message) => {
+                    if sender.send(Message::Text(message.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });

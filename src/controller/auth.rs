@@ -1,5 +1,7 @@
 use crate::controller::web::AppError;
+use crate::controller::tipi::SharedState;
 use axum::{
+    extract::State,
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
@@ -25,7 +27,8 @@ pub struct AuthUser {
     pub username: String,
 }
 
-pub fn create_jwt(user_id: i32, username: &str) -> Result<String, AppError> {
+pub fn create_jwt(user_id: i32, username: &str, secret: &str) -> Result<String, AppError> {
+    validate_jwt_secret(secret)?;
     let now = now_as_usize()?;
     let claims = Claims {
         sub: user_id,
@@ -36,24 +39,25 @@ pub fn create_jwt(user_id: i32, username: &str) -> Result<String, AppError> {
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(jwt_secret()?.as_bytes()),
+        &EncodingKey::from_secret(secret.as_bytes()),
     )
     .map_err(|e| AppError(format!("Napaka pri ustvarjanju JWT tokena: {e}")))
 }
 
-pub fn verify_jwt(token: &str) -> Option<Claims> {
+pub fn verify_jwt(token: &str, secret: &str) -> Option<Claims> {
+    validate_jwt_secret(secret).ok()?;
     decode::<Claims>(
         token,
-        &DecodingKey::from_secret(jwt_secret().ok()?.as_bytes()),
+        &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::default(),
     )
     .ok()
     .map(|data| data.claims)
 }
 
-pub fn auth_user_from_jar(jar: &CookieJar) -> Option<AuthUser> {
+pub fn auth_user_from_jar(jar: &CookieJar, secret: &str) -> Option<AuthUser> {
     let token = jar.get(SESSION_COOKIE)?.value();
-    let claims = verify_jwt(token)?;
+    let claims = verify_jwt(token, secret)?;
 
     Some(AuthUser {
         id: claims.sub,
@@ -61,8 +65,8 @@ pub fn auth_user_from_jar(jar: &CookieJar) -> Option<AuthUser> {
     })
 }
 
-pub fn require_auth(jar: &CookieJar) -> Result<AuthUser, Response> {
-    auth_user_from_jar(jar).ok_or_else(redirect_to_login)
+pub fn require_auth(jar: &CookieJar, secret: &str) -> Result<AuthUser, Response> {
+    auth_user_from_jar(jar, secret).ok_or_else(redirect_to_login)
 }
 
 pub fn session_cookie(token: String) -> Cookie<'static> {
@@ -87,8 +91,13 @@ pub fn redirect_to_login() -> Response {
     ([ ("HX-Redirect", "/authorisation.html") ], Html("")).into_response()
 }
 
-pub async fn me_handler(jar: CookieJar) -> Response {
-    match auth_user_from_jar(&jar) {
+pub async fn me_handler(jar: CookieJar, State(state): State<SharedState>) -> Response {
+    let secret = match state.lock() {
+        Ok(state) => state.jwt_secret.clone(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    match auth_user_from_jar(&jar, &secret) {
         Some(user) => Html(render_user_pill(&user.username)).into_response(),
         None => redirect_to_login(),
     }
@@ -114,17 +123,14 @@ fn render_user_pill(username: &str) -> String {
     )
 }
 
-fn jwt_secret() -> Result<String, AppError> {
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| AppError("JWT_SECRET ni nastavljen v .env".to_string()))?;
-
+pub fn validate_jwt_secret(secret: &str) -> Result<(), AppError> {
     if secret.trim().len() < 32 {
         return Err(AppError(
             "JWT_SECRET mora biti dolg vsaj 32 znakov.".to_string(),
         ));
     }
 
-    Ok(secret)
+    Ok(())
 }
 
 fn now_as_usize() -> Result<usize, AppError> {
@@ -143,7 +149,6 @@ fn html_escape(input: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-#[allow(dead_code)]
 pub fn unauthorized_response() -> Response {
     StatusCode::UNAUTHORIZED.into_response()
 }
