@@ -143,6 +143,87 @@
       cursor: pointer;
     }
 
+    /* ── FORME ZA SOBE ── */
+    .room-forms {
+      padding: 4px 16px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+
+    .form-group {
+      margin-bottom: 8px;
+    }
+
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .form-label {
+      display: block;
+      font-size: .6rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #5a5550;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .form-row input {
+      flex: 1;
+      min-width: 0;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: .78rem;
+      font-weight: 300;
+      color: #d0cbc4;
+      outline: none;
+      transition: border-color .2s, background .2s, box-shadow .2s;
+    }
+
+    .form-row input::placeholder {
+      color: #5a5550;
+      font-size: .72rem;
+    }
+
+    .form-row input:focus {
+      border-color: var(--accent);
+      background: rgba(255,255,255,0.08);
+      box-shadow: 0 0 0 2px rgba(42,96,73,.15);
+    }
+
+    .form-row button {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      line-height: 1;
+      color: #fff;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background .2s, transform .1s;
+    }
+
+    .form-row button:hover {
+      background: var(--accent-h);
+    }
+
+    .form-row button:active {
+      transform: scale(.92);
+    }
+
     /* ── MAIN ── */
     .main {
       flex: 1;
@@ -168,6 +249,18 @@
       letter-spacing: -.01em;
     }
 
+    .copy-id-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: .7rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .copy-id-btn:hover {
+      background: var(--bg);
+    }
     .connection-dot {
       width: 7px; height: 7px;
       border-radius: 50%;
@@ -359,22 +452,40 @@
   </div>
 
   <div class="section-label">Rooms</div>
-    <form
-      id="create-room-form"
-      hx-post="/rooms"
-      hx-target="#room-list"
-      hx-swap="beforeend">
-      <input
-          type="text"
-          name="name"
-          placeholder="Ime sobe"
-          maxlength="32"
-          pattern="[A-Za-z0-9_-]+"
-          required>
-      <button type="submit">
-          Ustvari sobo
-      </button>
-    </form>
+    <div class="room-forms">
+  <!-- USTVARI -->
+  <div class="form-group">
+    <label for="room-name" class="form-label">Nova soba</label>
+    <div class="form-row">
+      <input type="text"
+             id="room-name"
+             name="name"
+             placeholder="Ime sobe"
+             maxlength="32"
+             pattern="[A-Za-z0-9_-]+"
+             required
+             aria-label="Ime nove sobe">
+      <button type="submit" form="create-room-form" aria-label="Ustvari sobo">＋</button>
+    </div>
+  </div>
+
+  <!-- PRIDRUŽI SE -->
+  <div class="form-group">
+    <label for="room-id" class="form-label">Pridruži se</label>
+    <div class="form-row">
+      <input type="number"
+             id="room-id"
+             name="id"
+             placeholder="ID sobe"
+             required
+             aria-label="ID sobe">
+      <button type="submit" form="join-room-form" aria-label="Pridruži se">🔗</button>
+    </div>
+  </div>
+</div>
+
+  
+</div>
   <div class="room-list"
      id="room-list"
      hx-get="/rooms"

@@ -90,6 +90,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/rooms/{name}/panel", get(rooms::room_panel))
         .route("/rooms/{name}/messages", get(rooms::list_messages))
         .route("/rooms/{name}", axum::routing::delete(rooms::delete_room))
+        .route("/rooms/join", get(rooms::join_room))
         .fallback_service(ServeDir::new("static"))
         .with_state(state)
 }

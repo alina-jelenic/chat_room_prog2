@@ -34,6 +34,11 @@ pub struct MessagesQuery {
     pub before_id: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct JoinRoomParams {
+    pub id: i32,
+}
+
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
     // Pomembno: mutex držimo samo toliko časa, da kloniramo DatabaseConnection.
     // Nikoli ne držimo locka čez .await, ker lahko to hitro povzroči čudne blokade.
@@ -192,6 +197,40 @@ pub async fn room_panel(
         render_room_list(&db, &room.name).await?
     ));
 
+    Ok(Html(html).into_response())
+}
+
+pub async fn join_room(
+    jar: CookieJar,
+    State(state): State<SharedState>,
+    Query(params): Query<JoinRoomParams>,
+) -> Result<Response, AppError> {
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
+
+    let db = db_from_state(&state)?;
+    let room = match Soba::find()
+        .filter(soba::Column::Id.eq(params.id))
+        .one(&db)
+        .await?
+    {
+        Some(room) => room,
+        None => {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                Html(r#"<div class="sys-msg">Soba z ID-jem ne obstaja.</div>"#),
+            )
+                .into_response());
+        }
+    };
+
+    let mut html = render_chat_panel(&room, &user);
+    html.push_str(&format!(
+        r#"<div id="room-list" hx-swap-oob="innerHTML">{}</div>"#,
+        render_room_list(&db, &room.name).await?
+    ));
     Ok(Html(html).into_response())
 }
 
@@ -403,6 +442,7 @@ fn current_timestamp() -> i64 {
 fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
     let name = html_escape(&room.name);
     let username = html_escape(&user.username);
+    let id = room.id;
     let delete_control = if room.name == "general" {
         String::new()
     } else {
@@ -428,10 +468,12 @@ fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
+    <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
+    <button class="copy-id-btn" data-id="{id}" onclick="navigator.clipboard.writeText(this.dataset.id)">📋 Kopiraj ID</button>
     <div class="connection-dot connected" id="conn-dot"></div>
     <span class="connection-label" id="conn-label">websocket</span>
     {delete_control}
-  </div>
+</div>
 
   <div class="messages" id="messages"
     hx-get="/rooms/{name}/messages"
