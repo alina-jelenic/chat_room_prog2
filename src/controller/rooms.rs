@@ -4,12 +4,13 @@ use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, Message, Soba};
 use crate::entities::{client, message, soba};
 use axum::{
-    extract::{Form, Path, State},
+    extract::{Form, Path, State, Query},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
 use chrono::{DateTime, TimeZone, Utc};
+use sea_orm::QuerySelect;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
@@ -25,6 +26,13 @@ pub struct CreateRoomForm {
 }
 
 const MAX_MESSAGE_LENGTH: usize = 2000;
+
+const MESSAGES_PAGE_SIZE: u64 = 50;
+
+#[derive(Debug, Deserialize)]
+pub struct MessagesQuery {
+    pub before_id: Option<i32>,
+}
 
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
     // Pomembno: mutex držimo samo toliko časa, da kloniramo DatabaseConnection.
@@ -191,6 +199,7 @@ pub async fn list_messages(
     jar: CookieJar,
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
+    Query(query): Query<MessagesQuery>,
 ) -> Result<Response, AppError> {
     if let Err(response) = authenticated_user(&jar, &state) {
         return Ok(response);
@@ -202,7 +211,7 @@ pub async fn list_messages(
         None => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
 
-    Ok(Html(render_messages_for_room(&db, &room).await?).into_response())
+    Ok(Html(render_messages_page(&db, &room, query.before_id).await?).into_response())
 }
 
 pub async fn delete_room(
@@ -282,39 +291,57 @@ async fn render_room_list(
     Ok(html)
 }
 
-async fn render_messages_for_room(
+async fn render_messages_page(
     db: &DatabaseConnection,
     room: &soba::Model,
+    before_id: Option<i32>,
 ) -> Result<String, AppError> {
-    let messages = Message::find()
-        .filter(message::Column::SobaId.eq(room.id))
-        .order_by_asc(message::Column::Timestamp)
-        .order_by_asc(message::Column::Id)
+    let mut query = Message::find().filter(message::Column::SobaId.eq(room.id));
+
+    if let Some(before_id) = before_id {
+        query = query.filter(message::Column::Id.lt(before_id));
+    }
+
+    // Vzamemo eno sporočilo več, da ugotovimo, ali obstajajo še starejša.
+    let mut messages = query
+        .order_by_desc(message::Column::Id)
+        .limit(MESSAGES_PAGE_SIZE + 1)
         .all(db)
         .await?;
 
-    let sender_ids: Vec<i64> = messages.iter().filter_map(|msg| msg.sender_id).collect();
+    let has_more = messages.len() as u64 > MESSAGES_PAGE_SIZE;
+    if has_more {
+        messages.truncate(MESSAGES_PAGE_SIZE as usize);
+    }
+    messages.reverse(); // nazaj v kronološki vrstni red za izpis
 
+    let sender_ids: Vec<i64> = messages.iter().filter_map(|msg| msg.sender_id).collect();
     let clients = Client::find()
         .filter(client::Column::Id.is_in(sender_ids))
         .all(db)
         .await?;
-
     let sender_map: HashMap<i64, String> = clients
         .into_iter()
         .map(|client| (client.id as i64, client.username))
         .collect();
 
     let mut html = String::new();
-    let mut last_date = String::new();
 
-    if messages.is_empty() {
+    // Gumb za nalaganje starejših postavimo na vrh serije.
+    if has_more {
+        if let Some(oldest) = messages.first() {
+            html.push_str(&render_load_older_button(&room.name, oldest.id));
+        }
+    }
+
+    if messages.is_empty() && before_id.is_none() {
         html.push_str(&format!(
             r#"<div class="sys-msg">Dobrodošla v #{}</div>"#,
             html_escape(&room.name)
         ));
     }
 
+    let mut last_date = String::new();
     for msg in messages {
         let sender_name = msg
             .sender_id
@@ -336,6 +363,17 @@ async fn render_messages_for_room(
     Ok(html)
 }
 
+fn render_load_older_button(room_name: &str, before_id: i32) -> String {
+    let name = html_escape(room_name);
+    format!(
+        r##"<button type="button" class="load-older-btn"
+            hx-get="/rooms/{name}/messages?before_id={before_id}"
+            hx-target="this"
+            hx-swap="outerHTML">
+          Naloži starejša sporočila
+        </button>"##
+    )
+}
 async fn insert_message(
     db: &DatabaseConnection,
     room_id: i32,
