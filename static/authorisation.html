@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sl">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ChatRoom — Sign In / Create account</title>
+  <title>ChatRoom — Prijava / Ustvari račun</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
@@ -113,8 +113,8 @@
   <input type="radio" id="register-tab" name="auth-tab" class="tab-input">
 
   <div class="tab-bar">
-    <label for="login-tab"    class="tab-label">Sign in</label>
-    <label for="register-tab" class="tab-label">Create account</label>
+    <label for="login-tab"    class="tab-label">Prijava</label>
+    <label for="register-tab" class="tab-label">Ustvari račun</label>
   </div>
 
   <!-- ── LOGIN ── -->
@@ -126,22 +126,22 @@
           hx-swap="outerHTML">
 
       <div class="field">
-        <label for="login-username">Username</label>
+        <label for="login-username">Uporabniško ime</label>
         <input id="login-username" name="username" type="text"
-               placeholder="your username" autocomplete="username"
+               placeholder="tvoje uporabniško ime" autocomplete="username"
                minlength="3" maxlength="24"
                pattern="[A-Za-z][A-Za-z0-9_-]{2,23}" required>
       </div>
 
       <div class="field">
-        <label for="login-password">Password</label>
+        <label for="login-password">Geslo</label>
         <input id="login-password" name="password" type="password"
                placeholder="••••••••" autocomplete="current-password" required>
       </div>
 
       <button class="btn" type="submit">
-        <span class="htmx-indicator">Signing in…</span>
-        <span class="btn-label">Sign in</span>
+        <span class="htmx-indicator">Prijavljam…</span>
+        <span class="btn-label">Prijava</span>
       </button>
     </form>
   </div>
@@ -155,9 +155,9 @@
           hx-swap="outerHTML">
 
       <div class="field">
-        <label for="reg-username">Username</label>
+        <label for="reg-username">Uporabniško ime</label>
         <input id="reg-username" name="username" type="text"
-               placeholder="choose a username" autocomplete="username"
+               placeholder="izberi uporabniško ime" autocomplete="username"
                minlength="3" maxlength="24"
                pattern="[A-Za-z][A-Za-z0-9_-]{2,23}"
                title="3–24 znakov; začni s črko, nato uporabi črke, številke, - ali _"
@@ -165,20 +165,20 @@
       </div>
 
       <div class="field">
-        <label for="reg-password">Password</label>
+        <label for="reg-password">Geslo</label>
         <input id="reg-password" name="password" type="password"
-               placeholder="min. 6 characters" autocomplete="new-password" required>
+               placeholder="min. 6 znakov" autocomplete="new-password" required>
       </div>
 
       <div class="field">
-        <label for="reg-confirm">Confirm Password</label>
+        <label for="reg-confirm">Potrdi geslo</label>
         <input id="reg-confirm" name="confirm" type="password"
-               placeholder="repeat password" autocomplete="new-password" required>
+               placeholder="ponovi geslo" autocomplete="new-password" required>
       </div>
 
       <button class="btn" type="submit">
-        <span class="htmx-indicator">Creating account…</span>
-        <span class="btn-label">Create account</span>
+        <span class="htmx-indicator">Ustvarjam račun…</span>
+        <span class="btn-label">Ustvari račun</span>
       </button>
     </form>
   </div>
