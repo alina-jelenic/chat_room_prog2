@@ -69,7 +69,7 @@ pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppE
 pub async fn ensure_default_room(db: &DatabaseConnection) -> Result<(), AppError> {
     // Aplikacija trenutno predvideva sobo "general" že v HTML-ju.
     // Zato jo ustvarimo ob zagonu, če še ne obstaja.
-    ensure_room_exists(db, "general").await?;
+    ensure_room_exists(db, "general", None).await?;
     Ok(())
 }
 
@@ -83,8 +83,17 @@ pub async fn room_for_websocket(
         .one(db)
         .await?)
 }
+fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    err.to_string().contains("UNIQUE constraint failed")
+}
 
-async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba::Model, AppError> {
+const MAX_ID_ATTEMPTS: u32 = 5;
+
+async fn ensure_room_exists(
+    db: &DatabaseConnection,
+    name: &str,
+    owner_id: Option<i32>,
+) -> Result<soba::Model, AppError> {
     let clean_name = normalize_room_name(name)?;
 
     if let Some(room) = Soba::find()
@@ -96,17 +105,37 @@ async fn ensure_room_exists(db: &DatabaseConnection, name: &str) -> Result<soba:
     }
 
     use rand::Rng;
-    let code = rand::thread_rng().gen_range(100000..=999999);
 
-    let room = soba::ActiveModel {
-        id: Set(code),
-        name: Set(clean_name),
-        ..Default::default()
+    for attempt in 0..MAX_ID_ATTEMPTS {
+        let code = rand::thread_rng().gen_range(100_000..=999_999);
+
+        let result = soba::ActiveModel {
+            id: Set(code),
+            name: Set(clean_name.clone()),
+            owner_id: Set(owner_id),
+            ..Default::default()
+        }
+        .insert(db)
+        .await;
+
+        match result {
+            Ok(room) => {
+                return Ok(room);
+            }
+            Err(e) if is_unique_violation(&e) => {
+                if attempt + 1 == MAX_ID_ATTEMPTS {
+                    return Err(AppError(
+                        "Sobe trenutno ni bilo mogoče ustvariti, poskusi znova.".to_string(),
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
     }
-    .insert(db)
-    .await?;
 
-    Ok(room)
+    unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
 pub fn normalize_room_name(name: &str) -> Result<String, AppError> {
@@ -152,9 +181,10 @@ pub async fn create_room(
     State(state): State<SharedState>,
     Form(form): Form<CreateRoomForm>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = authenticated_user(&jar, &state) {
-        return Ok(response);
-    }
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
 
     let db = db_from_state(&state)?;
     let clean_name = normalize_room_name(&form.name)?;
@@ -162,7 +192,16 @@ pub async fn create_room(
         // Gumb za obstoječo sobo je že v seznamu, zato ga ne podvojimo.
         return Ok(Html(String::new()).into_response());
     }
-    let room = ensure_room_exists(&db, &clean_name).await?;
+    let room = match ensure_room_exists(&db, &clean_name, Some(user.id)).await {
+    Ok(room) => room,
+    Err(AppError(message)) => {
+        return Ok(Html(format!(
+            r#"<div class="sys-msg">{}</div>"#,
+            html_escape(&message)
+        ))
+        .into_response());
+    }
+};
 
     Ok(Html(render_room_button(&room, false)).into_response())
 }
@@ -284,7 +323,7 @@ pub async fn delete_room(
     Soba::delete_by_id(room.id).exec(&transaction).await?;
     transaction.commit().await?;
 
-    let general = ensure_room_exists(&db, "general").await?;
+    let general = ensure_room_exists(&db, "general", None).await?;
     let room_list = render_room_list(&db, &general.name).await?;
     notify_room_deleted(&state, room.id, &room.name, &room_list)?;
 
