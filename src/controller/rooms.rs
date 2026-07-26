@@ -82,6 +82,11 @@ pub async fn room_for_websocket(
         .one(db)
         .await?)
 }
+fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    err.to_string().contains("UNIQUE constraint failed")
+}
+
+const MAX_ID_ATTEMPTS: u32 = 5;
 
 async fn ensure_room_exists(
     db: &DatabaseConnection,
@@ -99,18 +104,37 @@ async fn ensure_room_exists(
     }
 
     use rand::Rng;
-    let code = rand::thread_rng().gen_range(100000..=999999);
 
-    let room = soba::ActiveModel {
-        id: Set(code),
-        name: Set(clean_name),
-        owner_id: Set(owner_id),
-        ..Default::default()
+    for attempt in 0..MAX_ID_ATTEMPTS {
+        let code = rand::thread_rng().gen_range(100_000..=999_999);
+
+        let result = soba::ActiveModel {
+            id: Set(code),
+            name: Set(clean_name.clone()),
+            owner_id: Set(owner_id),
+            ..Default::default()
+        }
+        .insert(db)
+        .await;
+
+        match result {
+            Ok(room) => {
+                return Ok(room);
+            }
+            Err(e) if is_unique_violation(&e) => {
+                if attempt + 1 == MAX_ID_ATTEMPTS {
+                    return Err(AppError(
+                        "Sobe trenutno ni bilo mogoče ustvariti, poskusi znova.".to_string(),
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
     }
-    .insert(db)
-    .await?;
 
-    Ok(room)
+    unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
 async fn ensure_room_membership<C>(
