@@ -90,7 +90,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/rooms/{name}/panel", get(rooms::room_panel))
         .route("/rooms/{name}/messages", get(rooms::list_messages))
         .route("/rooms/{name}", axum::routing::delete(rooms::delete_room))
-        .route("/rooms/join", get(rooms::join_room))
+        .route("/rooms/join", post(rooms::join_room))
         .fallback_service(ServeDir::new("static"))
         .with_state(state)
 }
@@ -130,6 +130,10 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         Ok(None) => return,
         Err(_) => return,
     };
+    match rooms::user_can_access_room(&db, &room, user.id).await {
+        Ok(true) => {}
+        Ok(false) | Err(_) => return,
+    }
 
     let (tx, mut rx) = {
         let mut state = match state.lock() {
