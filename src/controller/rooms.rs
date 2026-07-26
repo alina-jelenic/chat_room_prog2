@@ -1,20 +1,19 @@
 use crate::controller::auth::{require_auth, AuthUser};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
-use crate::entities::prelude::{Client, Message, Soba};
-use crate::entities::{client, message, soba};
+use crate::entities::prelude::{Client, Message, RoomMember, Soba};
+use crate::entities::{client, message, room_member, soba};
 use axum::{
-    extract::{Form, Path, State, Query},
+    extract::{Form, Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
-use chrono::{DateTime, TimeZone, Utc};
-use sea_orm::QuerySelect;
+use chrono::{Local, TimeZone};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -22,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
-    pub name: String,
+    pub name: Option<String>,
 }
 
 const MAX_MESSAGE_LENGTH: usize = 2000;
@@ -36,7 +35,7 @@ pub struct MessagesQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct JoinRoomParams {
-    pub id: i32,
+    pub id: Option<String>,
 }
 
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
@@ -138,6 +137,87 @@ async fn ensure_room_exists(
     unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
+async fn ensure_room_membership<C>(
+    db: &C,
+    room_id: i32,
+    user_id: i32,
+) -> Result<bool, AppError>
+where
+    C: ConnectionTrait,
+{
+    let already_joined = RoomMember::find()
+        .filter(room_member::Column::SobaId.eq(room_id))
+        .filter(room_member::Column::ClientId.eq(user_id))
+        .one(db)
+        .await?
+        .is_some();
+
+    if already_joined {
+        return Ok(false);
+    }
+
+    room_member::ActiveModel {
+        soba_id: Set(room_id),
+        client_id: Set(user_id),
+        ..Default::default()
+    }
+    .insert(db)
+    .await?;
+
+    Ok(true)
+}
+
+async fn is_room_member<C>(db: &C, room_id: i32, user_id: i32) -> Result<bool, AppError>
+where
+    C: ConnectionTrait,
+{
+    Ok(RoomMember::find()
+        .filter(room_member::Column::SobaId.eq(room_id))
+        .filter(room_member::Column::ClientId.eq(user_id))
+        .one(db)
+        .await?
+        .is_some())
+}
+
+pub async fn user_can_access_room(
+    db: &DatabaseConnection,
+    room: &soba::Model,
+    user_id: i32,
+) -> Result<bool, AppError> {
+    if room.name == "general" {
+        return Ok(true);
+    }
+
+    is_room_member(db, room.id, user_id).await
+}
+
+async fn create_owned_room(
+    db: &DatabaseConnection,
+    name: String,
+    owner_id: i32,
+) -> Result<soba::Model, AppError> {
+    use rand::Rng;
+
+let code = {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(100000..=999999)
+};
+
+let transaction = db.begin().await?;
+let room = soba::ActiveModel {
+    id: Set(code),
+        name: Set(name),
+        owner_id: Set(Some(owner_id)),
+        ..Default::default()
+    }
+    .insert(&transaction)
+    .await?;
+
+    ensure_room_membership(&transaction, room.id, owner_id).await?;
+    transaction.commit().await?;
+    Ok(room)
+}
+
 pub fn normalize_room_name(name: &str) -> Result<String, AppError> {
     let clean = name.trim().to_lowercase();
 
@@ -166,14 +246,15 @@ pub async fn list_rooms(
     jar: CookieJar,
     State(state): State<SharedState>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = authenticated_user(&jar, &state) {
-        return Ok(response);
-    }
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
 
     let db = db_from_state(&state)?;
     ensure_default_room(&db).await?;
 
-    Ok(Html(render_room_list(&db, "general").await?).into_response())
+    Ok(Html(render_room_list(&db, user.id, "general").await?).into_response())
 }
 
 pub async fn create_room(
@@ -187,23 +268,28 @@ pub async fn create_room(
     };
 
     let db = db_from_state(&state)?;
-    let clean_name = normalize_room_name(&form.name)?;
-    if room_for_websocket(&db, &clean_name).await?.is_some() {
-        // Gumb za obstoječo sobo je že v seznamu, zato ga ne podvojimo.
-        return Ok(Html(String::new()).into_response());
-    }
-    let room = match ensure_room_exists(&db, &clean_name, Some(user.id)).await {
-    Ok(room) => room,
-    Err(AppError(message)) => {
-        return Ok(Html(format!(
-            r#"<div class="sys-msg">{}</div>"#,
-            html_escape(&message)
-        ))
-        .into_response());
-    }
-};
+    let clean_name = match normalize_room_name(form.name.as_deref().unwrap_or_default()) {
+        Ok(name) => name,
+        Err(error) => return Ok(room_action_response("error", &error.0)),
+    };
 
-    Ok(Html(render_room_button(&room, false)).into_response())
+    if room_for_websocket(&db, &clean_name).await?.is_some() {
+        return Ok(room_action_response(
+            "error",
+            "Soba s tem imenom že obstaja. Pridruži se ji z njenim ID-jem.",
+        ));
+    }
+
+    let room = create_owned_room(&db, clean_name, user.id).await?;
+    let room_list = render_room_list(&db, user.id, &room.name).await?;
+    let mut html = render_room_action_message(
+        "success",
+        &format!("Soba #{} je ustvarjena.", room.name),
+    );
+    html.push_str(&render_chat_panel_oob(&room, &user));
+    html.push_str(&render_room_list_oob(&room_list));
+
+    Ok(Html(html).into_response())
 }
 
 pub async fn room_panel(
@@ -217,15 +303,16 @@ pub async fn room_panel(
     };
 
     let db = db_from_state(&state)?;
-    let room = match room_for_websocket(&db, &room_name).await? {
-        Some(room) => room,
-        None => {
-            return Ok((
-                StatusCode::NOT_FOUND,
-                Html(r#"<div class="sys-msg">Soba ne obstaja.</div>"#),
-            )
-                .into_response())
-        }
+    let room = match room_for_websocket(&db, &room_name).await {
+        Err(error) => return Ok(room_error_panel(&error.0)),
+        Ok(Some(room)) => room,
+        Ok(None) => return Ok(room_error_panel("Soba ne obstaja.")),
+    };
+
+    if !user_can_access_room(&db, &room, user.id).await? {
+        return Ok(room_error_panel(
+            "Tej sobi še nisi pridružen. Uporabi njen ID v obrazcu »Pridruži se«.",
+        ));
     };
 
     let mut html = render_chat_panel(&room, &user);
@@ -233,7 +320,7 @@ pub async fn room_panel(
     // Ko uporabnik zamenja sobo, hkrati posodobimo še aktiven gumb v seznamu sob.
     html.push_str(&format!(
         r#"<div id="room-list" hx-swap-oob="innerHTML">{}</div>"#,
-        render_room_list(&db, &room.name).await?
+        render_room_list(&db, user.id, &room.name).await?
     ));
 
     Ok(Html(html).into_response())
@@ -242,7 +329,7 @@ pub async fn room_panel(
 pub async fn join_room(
     jar: CookieJar,
     State(state): State<SharedState>,
-    Query(params): Query<JoinRoomParams>,
+    Form(params): Form<JoinRoomParams>,
 ) -> Result<Response, AppError> {
     let user = match authenticated_user(&jar, &state) {
         Ok(user) => user,
@@ -250,26 +337,54 @@ pub async fn join_room(
     };
 
     let db = db_from_state(&state)?;
+    let room_id = match params.id.as_deref().map(str::trim) {
+        Some(id) if !id.is_empty() => match id.parse::<i32>() {
+            Ok(id) => id,
+            Err(_) => {
+                return Ok(room_action_response(
+                    "error",
+                    "ID sobe mora biti veljavno število.",
+                ))
+            }
+        },
+        _ => return Ok(room_action_response("error", "Vnesi ID sobe.")),
+    };
+
     let room = match Soba::find()
-        .filter(soba::Column::Id.eq(params.id))
+        .filter(soba::Column::Id.eq(room_id))
         .one(&db)
         .await?
     {
         Some(room) => room,
-        None => {
-            return Ok((
-                StatusCode::NOT_FOUND,
-                Html(r#"<div class="sys-msg">Soba z ID-jem ne obstaja.</div>"#),
-            )
-                .into_response());
-        }
+        None => return Ok(room_action_response("error", "Soba s tem ID-jem ne obstaja.")),
     };
 
-    let mut html = render_chat_panel(&room, &user);
-    html.push_str(&format!(
-        r#"<div id="room-list" hx-swap-oob="innerHTML">{}</div>"#,
-        render_room_list(&db, &room.name).await?
-    ));
+    let joined_now = if room.name == "general" {
+        false
+    } else {
+        ensure_room_membership(&db, room.id, user.id).await?
+    };
+    let room = if room.owner_id.is_none() && room.name != "general" {
+        let mut active: soba::ActiveModel = room.into();
+        active.owner_id = Set(Some(user.id));
+        active.update(&db).await?
+    } else {
+        room
+    };
+
+    let room_list = render_room_list(&db, user.id, &room.name).await?;
+    let message = if joined_now {
+        format!("Pridružil si se sobi #{}.", room.name)
+    } else {
+        format!("Sobi #{} si že pridružen.", room.name)
+    };
+
+    let mut html = render_room_action_message(
+        if joined_now { "success" } else { "info" },
+        &message,
+    );
+    html.push_str(&render_chat_panel_oob(&room, &user));
+    html.push_str(&render_room_list_oob(&room_list));
     Ok(Html(html).into_response())
 }
 
@@ -279,15 +394,19 @@ pub async fn list_messages(
     Path(room_name): Path<String>,
     Query(query): Query<MessagesQuery>,
 ) -> Result<Response, AppError> {
-    if let Err(response) = authenticated_user(&jar, &state) {
-        return Ok(response);
-    }
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
 
     let db = db_from_state(&state)?;
     let room = match room_for_websocket(&db, &room_name).await? {
         Some(room) => room,
         None => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
+    if !user_can_access_room(&db, &room, user.id).await? {
+        return Ok(StatusCode::FORBIDDEN.into_response());
+    }
 
     Ok(Html(render_messages_page(&db, &room, query.before_id).await?).into_response())
 }
@@ -302,7 +421,10 @@ pub async fn delete_room(
         Err(response) => return Ok(response),
     };
 
-    let clean_name = normalize_room_name(&room_name)?;
+    let clean_name = match normalize_room_name(&room_name) {
+        Ok(name) => name,
+        Err(error) => return Ok(room_action_retarget_response("error", &error.0)),
+    };
     if clean_name == "general" {
         return Ok((StatusCode::BAD_REQUEST, "Sobe general ni mogoče izbrisati.").into_response());
     }
@@ -310,12 +432,28 @@ pub async fn delete_room(
     let db = db_from_state(&state)?;
     let room = match room_for_websocket(&db, &clean_name).await? {
         Some(room) => room,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
+        None => {
+            return Ok(room_action_retarget_response(
+                "error",
+                "Soba ne obstaja ali je bila že izbrisana.",
+            ))
+        }
     };
 
-    // Sporočila in sobo izbrišemo v isti transakciji, da v bazi ne more
-    // ostati napol izvedena operacija.
+    if room.owner_id != Some(user.id) {
+        return Ok(room_action_retarget_response(
+            "error",
+            "Sobo lahko izbriše samo uporabnik, ki jo je ustvaril.",
+        ));
+    }
+
+    // Članstva, sporočila in sobo izbrišemo v isti transakciji, da v bazi ne
+    // more ostati napol izvedena operacija.
     let transaction = db.begin().await?;
+    RoomMember::delete_many()
+        .filter(room_member::Column::SobaId.eq(room.id))
+        .exec(&transaction)
+        .await?;
     Message::delete_many()
         .filter(message::Column::SobaId.eq(room.id))
         .exec(&transaction)
@@ -324,8 +462,8 @@ pub async fn delete_room(
     transaction.commit().await?;
 
     let general = ensure_room_exists(&db, "general", None).await?;
-    let room_list = render_room_list(&db, &general.name).await?;
-    notify_room_deleted(&state, room.id, &room.name, &room_list)?;
+    let room_list = render_room_list(&db, user.id, &general.name).await?;
+    notify_room_deleted(&state, room.id, &room.name)?;
 
     let mut html = render_chat_panel(&general, &user);
     html.push_str(&render_room_list_oob(&room_list));
@@ -354,9 +492,25 @@ pub async fn create_websocket_message(
 
 async fn render_room_list(
     db: &DatabaseConnection,
+    user_id: i32,
     active_room_name: &str,
 ) -> Result<String, AppError> {
+    let mut room_ids = RoomMember::find()
+        .filter(room_member::Column::ClientId.eq(user_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|membership| membership.soba_id)
+        .collect::<Vec<_>>();
+
+    if let Some(general) = room_for_websocket(db, "general").await? {
+        room_ids.push(general.id);
+    }
+    room_ids.sort_unstable();
+    room_ids.dedup();
+
     let rooms = Soba::find()
+        .filter(soba::Column::Id.is_in(room_ids))
         .order_by_asc(soba::Column::Name)
         .all(db)
         .await?;
@@ -426,7 +580,9 @@ async fn render_messages_page(
             .and_then(|id| sender_map.get(&id))
             .map(String::as_str);
 
-        let date_str = DateTime::from_timestamp(msg.timestamp, 0)
+        let date_str = Local
+            .timestamp_opt(msg.timestamp, 0)
+            .single()
             .map(|dt| dt.format("%d. %m. %Y").to_string())
             .unwrap_or_else(|| "neznan datum".to_string());
 
@@ -479,10 +635,23 @@ fn current_timestamp() -> i64 {
 }
 
 fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
+    render_chat_panel_variant(room, user, false)
+}
+
+fn render_chat_panel_oob(room: &soba::Model, user: &AuthUser) -> String {
+    render_chat_panel_variant(room, user, true)
+}
+
+fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> String {
     let name = html_escape(&room.name);
     let username = html_escape(&user.username);
     let id = room.id;
-    let delete_control = if room.name == "general" {
+    let oob_attribute = if oob {
+        r#" hx-swap-oob="outerHTML""#
+    } else {
+        ""
+    };
+    let delete_control = if room.name == "general" || room.owner_id != Some(user.id) {
         String::new()
     } else {
         format!(
@@ -498,19 +667,14 @@ fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
 
     format!(
         r##"
-<div class="main" id="chat-panel"
+<div class="main" id="chat-panel"{oob_attribute}
      data-current-user-id="{user_id}"
      data-current-username="{username}"
      hx-ext="ws" ws-connect="/ws?room_name={name}">
-  <div id="offline-banner">WebSocket povezava je aktivna za #{name}</div>
-
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
-    <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
-    <button class="copy-id-btn" data-id="{id}" onclick="navigator.clipboard.writeText(this.dataset.id)">📋 Kopiraj ID</button>
-    <div class="connection-dot connected" id="conn-dot"></div>
-    <span class="connection-label" id="conn-label">websocket</span>
+    <span class="room-id">ID: {id}</span>
     {delete_control}
 </div>
 
@@ -538,6 +702,7 @@ fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
         name = name,
         username = username,
         user_id = user.id,
+        oob_attribute = oob_attribute,
         delete_control = delete_control,
         max_message_length = MAX_MESSAGE_LENGTH,
     )
@@ -547,11 +712,49 @@ fn render_room_list_oob(room_list: &str) -> String {
     format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)
 }
 
+fn render_room_list_reload_oob() -> String {
+    r#"<div class="room-list" id="room-list" hx-swap-oob="outerHTML"
+         hx-get="/rooms" hx-trigger="load" hx-swap="innerHTML"></div>"#
+        .to_string()
+}
+
+fn render_room_action_message(kind: &str, message: &str) -> String {
+    format!(
+        r#"<div class="room-action-message {}">{}</div>"#,
+        html_escape(kind),
+        html_escape(message)
+    )
+}
+
+fn room_action_response(kind: &str, message: &str) -> Response {
+    Html(render_room_action_message(kind, message)).into_response()
+}
+
+fn room_action_retarget_response(kind: &str, message: &str) -> Response {
+    (
+        [
+            ("HX-Retarget", "#room-action-msg"),
+            ("HX-Reswap", "innerHTML"),
+        ],
+        Html(render_room_action_message(kind, message)),
+    )
+        .into_response()
+}
+
+fn room_error_panel(message: &str) -> Response {
+    Html(format!(
+        r#"<div class="main" id="chat-panel">
+          <div class="room-panel-error">{}</div>
+        </div>"#,
+        html_escape(message)
+    ))
+    .into_response()
+}
+
 fn notify_room_deleted(
     state: &SharedState,
     deleted_room_id: i32,
     deleted_room_name: &str,
-    room_list: &str,
 ) -> Result<(), AppError> {
     let (deleted_room_sender, other_senders) = {
         let mut state = state
@@ -562,7 +765,7 @@ fn notify_room_deleted(
         (deleted, others)
     };
 
-    let room_list_oob = render_room_list_oob(room_list);
+    let room_list_oob = render_room_list_reload_oob();
     for sender in other_senders {
         let _ = sender.send(room_list_oob.clone());
     }
@@ -587,7 +790,7 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
         .filter(|name| !name.is_empty())
         .unwrap_or("neznan uporabnik");
 
-    let time_str = Utc
+    let time_str = Local
         .timestamp_opt(timestamp, 0)
         .single()
         .map(|dt| dt.format("%H:%M").to_string())

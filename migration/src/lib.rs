@@ -6,6 +6,7 @@ mod m20260522_114715_client;
 mod m20260531_000001_client_geslo;
 mod m20260531_000002_message_soba_id;
 mod m20260719_000001_client_username_unique;
+mod m20260726_000001_room_membership;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260531_000001_client_geslo::Migration),
             Box::new(m20260531_000002_message_soba_id::Migration),
             Box::new(m20260719_000001_client_username_unique::Migration),
+            Box::new(m20260726_000001_room_membership::Migration),
         ]
     }
 }
