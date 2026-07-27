@@ -674,7 +674,9 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
-    <span class="room-id">ID: {id}</span>
+    <span class="room-id">ID: {id} <button type="button" class="copy-id-btn" onclick="navigator.clipboard.writeText('{id}')" title="Kopiraj ID sobe">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M3 10.5V3a1 1 0 0 1 1-1h7.5" stroke="currentColor" stroke-width="1.3"/></svg>
+    </button></span>
     {delete_control}
 </div>
 

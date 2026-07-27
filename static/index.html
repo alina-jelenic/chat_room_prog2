@@ -256,6 +256,18 @@
       font-size: .7rem;
     }
 
+    .copy-id-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .85rem;
+      line-height: 1;
+      padding: 0 0 0 4px;
+      vertical-align: middle;
+    }
+    .copy-id-btn:hover { color: var(--accent); }
+
     .delete-room-btn {
       border: 1px solid #e3b8b8;
       border-radius: 7px;
@@ -406,40 +418,51 @@
   </div>
 
   <div class="section-label">Sobe</div>
+  <div id="room-action-msg"></div>
     <div class="room-forms">
   <!-- USTVARI -->
-  <div class="form-group">
-    <label for="room-name" class="form-label">Nova soba</label>
-    <div class="form-row">
-      <input type="text"
-             id="room-name"
-             name="name"
-             placeholder="Ime sobe"
-             maxlength="32"
-             pattern="[A-Za-z0-9_-]+"
-             required
-             aria-label="Ime nove sobe">
-      <button type="submit" form="create-room-form" aria-label="Ustvari sobo">＋</button>
+  <form id="create-room-form"
+        hx-post="/rooms"
+        hx-target="#room-action-msg"
+        hx-swap="innerHTML">
+    <div class="form-group">
+      <label for="room-name" class="form-label">Nova soba</label>
+      <div class="form-row">
+        <input type="text"
+               id="room-name"
+               name="name"
+               placeholder="Ime sobe"
+               maxlength="32"
+               pattern="[A-Za-z0-9_-]+"
+               required
+               aria-label="Ime nove sobe">
+        <button type="submit" aria-label="Ustvari sobo">＋</button>
+      </div>
     </div>
-  </div>
+  </form>
 
   <!-- PRIDRUŽI SE -->
-  <div class="form-group">
-    <label for="room-id" class="form-label">Pridruži se</label>
-    <div class="form-row">
-      <input type="number"
-             id="room-id"
-             name="id"
-             placeholder="ID sobe"
-             required
-             aria-label="ID sobe">
-      <button type="submit" form="join-room-form" aria-label="Pridruži se">🔗</button>
+  <form id="join-room-form"
+        hx-post="/rooms/join"
+        hx-target="#room-action-msg"
+        hx-swap="innerHTML">
+    <div class="form-group">
+      <label for="room-id" class="form-label">Pridruži se</label>
+      <div class="form-row">
+        <input type="number"
+               id="room-id"
+               name="id"
+               placeholder="ID sobe"
+               required
+               aria-label="ID sobe">
+        <button type="submit" aria-label="Pridruži se">🔗</button>
+      </div>
     </div>
-  </div>
+  </form>
 </div>
 
   
-</div>
+
   <div class="room-list"
      id="room-list"
      hx-get="/rooms"
