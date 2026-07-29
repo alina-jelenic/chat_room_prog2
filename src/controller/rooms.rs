@@ -486,9 +486,17 @@ pub async fn create_websocket_message(
         )));
     }
 
+    let room_still_exists = Soba::find_by_id(room_id).one(db).await?.is_some();
+    if !room_still_exists {
+        // Soba je bila med tem, ko je uporabnik tipkal, že izbrisana.
+        // Sporočila ne shranimo — vrnemo prazen niz, enako kot pri praznem sporočilu.
+        return Ok(String::new());
+    }
+
     let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
     Ok(render_message_oob(&msg, Some(&user.username), msg.timestamp))
 }
+
 
 async fn render_room_list(
     db: &DatabaseConnection,
