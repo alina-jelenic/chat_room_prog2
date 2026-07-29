@@ -837,6 +837,23 @@ async fn websocket_message_is_authenticated_persisted_and_broadcast() {
     server.abort();
 }
 
+async fn recv_until<S>(socket: &mut S, needle: &str) -> String
+where
+    S: futures_util::Stream<Item = Result<WsMessage, WsError>> + Unpin,
+{
+    loop {
+        let msg = socket
+            .next()
+            .await
+            .expect("povezava se je nepričakovano zaprla")
+            .unwrap();
+        let text = msg.into_text().unwrap().to_string();
+        if text.contains(needle) {
+            return text;
+        }
+    }
+}
+
 #[tokio::test]
 async fn websocket_broadcast_reaches_two_joined_users() {
     let (app, db) = test_app().await;
@@ -886,28 +903,17 @@ async fn websocket_broadcast_reaches_two_joined_users() {
     // Handshake se zaključi tik preden se strežniška naloga naroči na broadcast.
     // Z dvema kratkima sporočiloma zato najprej deterministično preverimo, da
     // sta oba odjemalca zares pripravljena, in se izognemo časovno občutljivemu testu.
+    // `recv_until` bere naprej, dokler ne najde iskanega niza, in tako ne pusti
+    // za sabo neprebranih "reset textarea" frame-ov, ki bi zmedli poznejše branje.
     owner_socket
         .send(WsMessage::Text(
             r#"{"content":"owner-ready"}"#.into(),
         ))
         .await
         .unwrap();
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let text = owner_socket
-                .next()
-                .await
-                .expect("lastnikova povezava se je zaprla")
-                .unwrap()
-                .into_text()
-                .unwrap();
-            if text.contains("owner-ready") {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("lastnikov WebSocket ni postal pripravljen");
+    timeout(Duration::from_secs(2), recv_until(&mut owner_socket, "owner-ready"))
+        .await
+        .expect("lastnikov WebSocket ni postal pripravljen");
 
     member_socket
         .send(WsMessage::Text(
@@ -915,38 +921,12 @@ async fn websocket_broadcast_reaches_two_joined_users() {
         ))
         .await
         .unwrap();
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let text = member_socket
-                .next()
-                .await
-                .expect("članova povezava se je zaprla")
-                .unwrap()
-                .into_text()
-                .unwrap();
-            if text.contains("member-ready") {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("članov WebSocket ni postal pripravljen");
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let text = owner_socket
-                .next()
-                .await
-                .expect("lastnikova povezava se je zaprla")
-                .unwrap()
-                .into_text()
-                .unwrap();
-            if text.contains("member-ready") {
-                break;
-            }
-        }
-    })
-    .await
-    .expect("lastnik ni prejel potrditve članove pripravljenosti");
+    timeout(Duration::from_secs(2), recv_until(&mut member_socket, "member-ready"))
+        .await
+        .expect("članov WebSocket ni postal pripravljen");
+    timeout(Duration::from_secs(2), recv_until(&mut owner_socket, "member-ready"))
+        .await
+        .expect("lastnik ni prejel potrditve članove pripravljenosti");
 
     message::Entity::delete_many()
         .filter(message::Column::SobaId.eq(room.id))
@@ -961,20 +941,18 @@ async fn websocket_broadcast_reaches_two_joined_users() {
         .await
         .unwrap();
 
-    let owner_received = timeout(Duration::from_secs(2), owner_socket.next())
-        .await
-        .expect("lastnik ni pravočasno prejel sporočila")
-        .expect("lastnikova povezava se je zaprla")
-        .unwrap()
-        .into_text()
-        .unwrap();
-    let member_received = timeout(Duration::from_secs(2), member_socket.next())
-        .await
-        .expect("član ni pravočasno prejel sporočila")
-        .expect("članova povezava se je zaprla")
-        .unwrap()
-        .into_text()
-        .unwrap();
+    let owner_received = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "sporočilo za oba"),
+    )
+    .await
+    .expect("lastnik ni pravočasno prejel sporočila");
+    let member_received = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "sporočilo za oba"),
+    )
+    .await
+    .expect("član ni pravočasno prejel sporočila");
 
     for received in [owner_received, member_received] {
         assert!(received.contains("sporočilo za oba"));
