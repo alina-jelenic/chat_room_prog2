@@ -821,6 +821,16 @@ fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp
     )
 }
 
+/// Po uspešno oddanem sporočilu je treba izprazniti polje za vnos samo pri
+/// pošiljatelju — ne prek broadcast kanala sobe, ker bi to izbrisalo
+/// nedokončano besedilo drugim uporabnikom, ki ravno takrat tipkajo.
+pub fn render_message_input_reset() -> String {
+    format!(
+        r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>"#,
+        max_message_length = MAX_MESSAGE_LENGTH,
+    )
+}
+
 fn render_room_button(room: &soba::Model, active: bool) -> String {
     let active_class = if active { " active" } else { "" };
     let pressed = if active { "true" } else { "false" };

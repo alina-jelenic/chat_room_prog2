@@ -144,18 +144,41 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         (tx.clone(), tx.subscribe())
     };
 
+    //za praznenje polja za vnos (predvsem za stvari, ki jih narediš samo pri eni osebi in ne pri vseh)
+    let (personal_tx, mut personal_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
     let (mut sender, mut receiver) = socket.split();
 
     let send_task = tokio::spawn(async move {
         loop {
-            match rx.recv().await {
-                Ok(message) => {
-                    if sender.send(Message::Text(message.into())).await.is_err() {
-                        break;
+            tokio::select! {
+                // `biased` zagotovi, da broadcast sporočilo (dejansko
+                // sporočilo v klepetu) vedno pošljemo pred morebitnim
+                // čakajočim osebnim sporočilom (reset forme), ki je bilo
+                // postavljeno v vrsto tik za njim.
+                biased;
+
+                broadcasted = rx.recv() => {
+                    match broadcasted {
+                        Ok(message) => {
+                            if sender.send(Message::Text(message.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+                personal = personal_rx.recv() => {
+                    match personal {
+                        Some(message) => {
+                            if sender.send(Message::Text(message.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
             }
         }
     });
@@ -167,6 +190,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                     match rooms::create_websocket_message(&db, room.id, &user, &content).await {
                         Ok(html) if !html.is_empty() => {
                             let _ = tx.send(html);
+                            let _ = personal_tx.send(rooms::render_message_input_reset());
                         }
                         Ok(_) => {}
                         Err(e) => eprintln!("Napaka pri shranjevanju WebSocket sporočila: {e}"),
