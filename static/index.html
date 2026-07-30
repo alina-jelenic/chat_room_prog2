@@ -18,6 +18,14 @@
       --muted:     #8a857d;
       --accent:    #2a6049;
       --accent-h:  #1f4a37;
+      --error:     #b94040;
+      --error-bg:  #fdf0f0;
+      --error-border: #f3c8c8;
+      --success-bg: #edf7f2;
+      --success-border: #b5dcc8;
+      --info:      #5a7a94;
+      --info-bg:   #eef4f8;
+      --info-border: #c6dbe8;
       --radius:    10px;
     }
 
@@ -293,6 +301,43 @@
       cursor: pointer;
     } 
     .load-older-btn:hover { background: var(--bg); }
+
+    /* ── SPOROČILA O NAPAKAH / USPEHU / INFO ── */
+  .room-action-message {
+    margin: 0 16px 10px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: .78rem;
+    line-height: 1.4;
+  }
+
+  .room-action-message.error {
+    background: var(--error-bg);
+    color: var(--error);
+    border: 1px solid var(--error-border);
+  }
+
+  .room-action-message.success {
+    background: var(--success-bg);
+    color: var(--accent);
+    border: 1px solid var(--success-border);
+  }
+
+  .room-action-message.info {
+    background: var(--info-bg);
+    color: var(--info);
+    border: 1px solid var(--info-border);
+  }
+
+  .room-panel-error {
+    margin: 24px 28px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--error-bg);
+    color: var(--error);
+    border: 1px solid var(--error-border);
+    font-size: .85rem;
+  }
 
     /* ── MESSAGES ── */
     .messages {
