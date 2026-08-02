@@ -1,19 +1,19 @@
 // HTTP endpointi skrbijo za avtentikacijo, sobe in nalaganje zgodovine.
 // WebSocket povezava skrbi samo za realnočasovno izmenjavo sporočil.
 
-use crate::controller::auth::{auth_user_from_jar, unauthorized_response, AuthUser};
+use crate::controller::auth::{AuthUser, auth_user_from_jar, unauthorized_response};
 use crate::controller::forms::{login_handler, register_handler};
 use crate::controller::rooms;
 use crate::controller::tipi::SharedState;
 use axum::http::StatusCode;
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use axum_extra::extract::cookie::CookieJar;
 use futures_util::{SinkExt, StreamExt};

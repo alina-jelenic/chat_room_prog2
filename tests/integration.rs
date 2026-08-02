@@ -1,14 +1,14 @@
 use axum::{
-    body::{to_bytes, Body},
-    http::{
-        header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
-        Request, StatusCode,
-    },
     Router,
+    body::{Body, to_bytes},
+    http::{
+        Request, StatusCode,
+        header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
+    },
 };
 use chat_room_prog2::{
     controller::{
-        auth::{create_jwt, validate_jwt_secret, verify_jwt, SESSION_COOKIE},
+        auth::{SESSION_COOKIE, create_jwt, validate_jwt_secret, verify_jwt},
         forms::{normalize_username, verify_password},
         rooms::{ensure_default_room, prepare_database_schema},
         tipi::ServerState,
@@ -27,10 +27,10 @@ use sea_orm::{
     EntityTrait, PaginatorTrait, QueryFilter, Set,
 };
 use std::net::SocketAddr;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, Error as WsError, Message as WsMessage},
+    tungstenite::{Error as WsError, Message as WsMessage, client::IntoClientRequest},
 };
 use tower::ServiceExt;
 
@@ -393,12 +393,14 @@ async fn registration_login_room_panel_and_deletion_work_together() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    assert!(chat_room_prog2::entities::prelude::Soba::find()
-        .filter(chat_room_prog2::entities::soba::Column::Name.eq("rust"))
-        .one(&db)
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        chat_room_prog2::entities::prelude::Soba::find()
+            .filter(chat_room_prog2::entities::soba::Column::Name.eq("rust"))
+            .one(&db)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(message::Entity::find().count(&db).await.unwrap(), 0);
 }
 
@@ -473,9 +475,11 @@ async fn invalid_and_duplicate_room_names_do_not_create_rooms() {
             .oneshot(form_request("POST", "/rooms", body, Some(&cookie)))
             .await
             .unwrap();
-        assert!(body_text(response)
-            .await
-            .contains("room-action-message error"));
+        assert!(
+            body_text(response)
+                .await
+                .contains("room-action-message error")
+        );
     }
     assert_eq!(Soba::find().count(&db).await.unwrap(), 1);
 
@@ -547,9 +551,11 @@ async fn room_membership_controls_listing_history_and_deletion() {
         .oneshot(form_request("GET", "/rooms", "", Some(&member_cookie)))
         .await
         .unwrap();
-    assert!(!body_text(response)
-        .await
-        .contains("data-room-name=\"projekt\""));
+    assert!(
+        !body_text(response)
+            .await
+            .contains("data-room-name=\"projekt\"")
+    );
 
     let response = app
         .clone()
@@ -586,9 +592,11 @@ async fn room_membership_controls_listing_history_and_deletion() {
             ))
             .await
             .unwrap();
-        assert!(body_text(response)
-            .await
-            .contains("room-action-message error"));
+        assert!(
+            body_text(response)
+                .await
+                .contains("room-action-message error")
+        );
     }
 
     let response = app
@@ -601,9 +609,11 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response)
-        .await
-        .contains("Pridružil si se sobi #projekt"));
+    assert!(
+        body_text(response)
+            .await
+            .contains("Pridružil si se sobi #projekt")
+    );
 
     let member = Client::find()
         .filter(client::Column::Username.eq("jovan"))

@@ -12,8 +12,8 @@ use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
 use crate::entities::{client, prelude::Client};
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 
 #[derive(Deserialize)]
@@ -106,7 +106,7 @@ pub async fn register_handler(
         Err(message) => {
             return Ok(Html(format!(
                 r#"<div id="register-msg" class="server-msg error">{message}</div>"#
-            )))
+            )));
         }
     };
 

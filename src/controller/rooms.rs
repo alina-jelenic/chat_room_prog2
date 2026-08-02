@@ -1,4 +1,4 @@
-use crate::controller::auth::{require_auth, AuthUser};
+use crate::controller::auth::{AuthUser, require_auth};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, Message, RoomMember, Soba};
@@ -338,7 +338,7 @@ pub async fn join_room(
                 return Ok(room_action_response(
                     "error",
                     "ID sobe mora biti veljavno število.",
-                ))
+                ));
             }
         },
         _ => return Ok(room_action_response("error", "Vnesi ID sobe.")),
@@ -354,7 +354,7 @@ pub async fn join_room(
             return Ok(room_action_response(
                 "error",
                 "Soba s tem ID-jem ne obstaja.",
-            ))
+            ));
         }
     };
 
@@ -413,7 +413,7 @@ pub async fn leave_room(
             return Ok(room_action_retarget_response(
                 "error",
                 "Soba ne obstaja ali je bila že izbrisana.",
-            ))
+            ));
         }
     };
 
@@ -496,7 +496,7 @@ pub async fn delete_room(
             return Ok(room_action_retarget_response(
                 "error",
                 "Soba ne obstaja ali je bila že izbrisana.",
-            ))
+            ));
         }
     };
 
