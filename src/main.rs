@@ -20,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = Database::connect(&database_url).await?;
 
-    // Ključni popravek: migracije morajo teči pred ServerState::new in pred zagonom routerja.
-    // S tem se tabele client, soba, message in seaql_migrations ustvarijo samodejno.
+    // Migracije izvedemo pred pripravo stanja strežnika in zagonom usmerjevalnika.
+    // Tako se vse potrebne tabele ustvarijo samodejno.
     prepare_database_schema(&db).await?;
 
     // Frontend privzeto odpre sobo #general, zato jo pripravimo že ob zagonu.

@@ -43,7 +43,7 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
     // Nikoli ne držimo locka čez .await, ker lahko to hitro povzroči čudne blokade.
     Ok(state
         .lock()
-        .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?
+        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
         .db
         .clone())
 }
@@ -195,23 +195,39 @@ async fn create_owned_room(
 ) -> Result<soba::Model, AppError> {
     use rand::Rng;
 
-    let code = {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(100000..=999999)
-    };
+    for attempt in 0..MAX_ID_ATTEMPTS {
+        let code = rand::thread_rng().gen_range(100_000..=999_999);
+        let transaction = db.begin().await?;
+        let result = soba::ActiveModel {
+            id: Set(code),
+            name: Set(name.clone()),
+            owner_id: Set(Some(owner_id)),
+        }
+        .insert(&transaction)
+        .await;
 
-    let transaction = db.begin().await?;
-    let room = soba::ActiveModel {
-        id: Set(code),
-        name: Set(name),
-        owner_id: Set(Some(owner_id)),
+        match result {
+            Ok(room) => {
+                ensure_room_membership(&transaction, room.id, owner_id).await?;
+                transaction.commit().await?;
+                return Ok(room);
+            }
+            Err(error) if is_unique_violation(&error) => {
+                transaction.rollback().await?;
+                if attempt + 1 == MAX_ID_ATTEMPTS {
+                    return Err(AppError(
+                        "Sobe trenutno ni bilo mogoče ustvariti, poskusi znova.".to_string(),
+                    ));
+                }
+            }
+            Err(error) => {
+                transaction.rollback().await?;
+                return Err(error.into());
+            }
+        }
     }
-    .insert(&transaction)
-    .await?;
 
-    ensure_room_membership(&transaction, room.id, owner_id).await?;
-    transaction.commit().await?;
-    Ok(room)
+    unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
 pub fn normalize_room_name(name: &str) -> Result<String, AppError> {
@@ -225,7 +241,8 @@ pub fn normalize_room_name(name: &str) -> Result<String, AppError> {
         return Err(AppError("Ime sobe je predolgo.".to_string()));
     }
 
-    // Namerno omejeno: manj težav pri URL-jih, selectorjih in kasnejšem WebSocket query parametru.
+    // Nabor znakov je namenoma omejen, da se izognemo težavam v URL-jih,
+    // izbirnikih in poizvedbenem parametru povezave WebSocket.
     if !clean
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
@@ -305,7 +322,7 @@ pub async fn room_panel(
 
     if !user_can_access_room(&db, &room, user.id).await? {
         return Ok(room_error_panel(
-            "Tej sobi še nisi pridružen. Uporabi njen ID v obrazcu »Pridruži se«.",
+            "Do te sobe še nimaš dostopa. Uporabi njen ID v obrazcu »Pridruži se«.",
         ));
     };
 
@@ -373,9 +390,9 @@ pub async fn join_room(
 
     let room_list = render_room_list(&db, user.id, &room.name).await?;
     let message = if joined_now {
-        format!("Pridružil si se sobi #{}.", room.name)
+        format!("Zdaj si v sobi #{}.", room.name)
     } else {
-        format!("Sobi #{} si že pridružen.", room.name)
+        format!("Že si v sobi #{}.", room.name)
     };
 
     let mut html =
@@ -420,7 +437,7 @@ pub async fn leave_room(
     if room.owner_id == Some(user.id) {
         return Ok(room_action_retarget_response(
             "error",
-            "Lastnik sobe je ne more zapustiti; lahko jo izbriše.",
+            "Sobe kot njen lastnik ne moreš zapustiti; lahko jo izbrišeš.",
         ));
     }
 
@@ -432,7 +449,7 @@ pub async fn leave_room(
     if result.rows_affected == 0 {
         return Ok(room_action_retarget_response(
             "error",
-            "Tej sobi nisi pridružen.",
+            "Do te sobe nimaš dostopa.",
         ));
     }
 
@@ -442,7 +459,7 @@ pub async fn leave_room(
     html.push_str(&render_room_list_oob(&room_list));
     html.push_str(&render_room_action_message_oob(
         "success",
-        &format!("Zapustil si sobo #{}.", room.name),
+        &format!("Nisi več v sobi #{}.", room.name),
     ));
 
     Ok(Html(html).into_response())
@@ -637,7 +654,7 @@ async fn render_messages_page(
 
     if messages.is_empty() && before_id.is_none() {
         html.push_str(&format!(
-            r#"<div class="sys-msg">Dobrodošla v #{}</div>"#,
+            r#"<div class="sys-msg">To je začetek pogovora v #{}</div>"#,
             html_escape(&room.name)
         ));
     }
@@ -845,7 +862,7 @@ fn notify_room_deleted(
     let (deleted_room_sender, other_senders) = {
         let mut state = state
             .lock()
-            .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?;
+            .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?;
         let deleted = state.soba_tx.remove(&deleted_room_id);
         let others = state.soba_tx.values().cloned().collect::<Vec<_>>();
         (deleted, others)

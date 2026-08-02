@@ -1,4 +1,4 @@
-// tukaj koda za obdelavo login in sign up
+// Obdelava prijave in registracije.
 use axum::{
     extract::{Form, State},
     response::{Html, IntoResponse, Response},
@@ -73,7 +73,7 @@ pub async fn login_handler(
     let (db, jwt_secret) = {
         let state = state
             .lock()
-            .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?;
+            .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?;
         (state.db.clone(), state.jwt_secret.clone())
     };
     let user = Client::find()
@@ -125,7 +125,7 @@ pub async fn register_handler(
 
     let db = state
         .lock()
-        .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?
+        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
         .db
         .clone();
 
@@ -140,7 +140,8 @@ pub async fn register_handler(
         ));
     }
 
-    // hashas zato ker ne želimo samo texta v bazi ( lahko ukradejo) plus dve osebi lahko enako geslo.
+    // Geslo zgoščujemo, da ga v bazi ne hranimo v čisti obliki.
+    // Naključna sol omogoča varno uporabo enakih gesel pri različnih uporabnikih.
     let hashed = hash_password(&form.password).map_err(AppError)?;
 
     client::ActiveModel {
@@ -152,7 +153,7 @@ pub async fn register_handler(
     .await?;
 
     Ok(Html(
-        r#"<div id="register-msg" class="server-msg success">Račun ustvarjen! <a href="/authorisation.html">Prijavi se</a></div>"#.to_string(),
+        r#"<div id="register-msg" class="server-msg success">Račun je ustvarjen! <a href="/authorisation.html">Prijavi se</a></div>"#.to_string(),
     ))
 }
 

@@ -149,7 +149,8 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         (tx.clone(), tx.subscribe())
     };
 
-    //za praznenje polja za vnos (predvsem za stvari, ki jih narediš samo pri eni osebi in ne pri vseh)
+    // Kanal za odgovore, namenjene samo trenutnemu uporabniku,
+    // na primer za praznjenje njegovega vnosnega polja.
     let (personal_tx, mut personal_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let (mut sender, mut receiver) = socket.split();
@@ -192,13 +193,22 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         match result {
             Ok(Message::Text(text)) => {
                 if let Some(content) = websocket_content(&text) {
+                    // Članstvo se lahko spremeni tudi po vzpostavitvi povezave,
+                    // na primer če uporabnik sobo zapusti v drugem zavihku.
+                    // Pred vsakim sporočilom ga zato preverimo znova. Če dostopa
+                    // nima več, povezavo zapremo in sporočila ne shranimo.
+                    match rooms::user_can_access_room(&db, &room, user.id).await {
+                        Ok(true) => {}
+                        Ok(false) | Err(_) => break,
+                    }
+
                     match rooms::create_websocket_message(&db, room.id, &user, &content).await {
                         Ok(html) if !html.is_empty() => {
                             let _ = tx.send(html);
                             let _ = personal_tx.send(rooms::render_message_input_reset());
                         }
                         Ok(_) => {}
-                        Err(e) => eprintln!("Napaka pri shranjevanju WebSocket sporočila: {e}"),
+                        Err(e) => eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}"),
                     }
                 }
             }
@@ -214,7 +224,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
 fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
     Ok(state
         .lock()
-        .map_err(|_| AppError("Napaka: zaklenjen state".to_string()))?
+        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
         .db
         .clone())
 }

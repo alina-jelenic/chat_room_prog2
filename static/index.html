@@ -303,41 +303,41 @@
     .load-older-btn:hover { background: var(--bg); }
 
     /* ── SPOROČILA O NAPAKAH / USPEHU / INFO ── */
-  .room-action-message {
-    margin: 0 16px 10px;
-    padding: 9px 12px;
-    border-radius: 8px;
-    font-size: .78rem;
-    line-height: 1.4;
-  }
+    .room-action-message {
+      margin: 0 16px 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: .78rem;
+      line-height: 1.4;
+    }
 
-  .room-action-message.error {
-    background: var(--error-bg);
-    color: var(--error);
-    border: 1px solid var(--error-border);
-  }
+    .room-action-message.error {
+      background: var(--error-bg);
+      color: var(--error);
+      border: 1px solid var(--error-border);
+    }
 
-  .room-action-message.success {
-    background: var(--success-bg);
-    color: var(--accent);
-    border: 1px solid var(--success-border);
-  }
+    .room-action-message.success {
+      background: var(--success-bg);
+      color: var(--accent);
+      border: 1px solid var(--success-border);
+    }
 
-  .room-action-message.info {
-    background: var(--info-bg);
-    color: var(--info);
-    border: 1px solid var(--info-border);
-  }
+    .room-action-message.info {
+      background: var(--info-bg);
+      color: var(--info);
+      border: 1px solid var(--info-border);
+    }
 
-  .room-panel-error {
-    margin: 24px 28px;
-    padding: 14px 16px;
-    border-radius: 10px;
-    background: var(--error-bg);
-    color: var(--error);
-    border: 1px solid var(--error-border);
-    font-size: .85rem;
-  }
+    .room-panel-error {
+      margin: 24px 28px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: var(--error-bg);
+      color: var(--error);
+      border: 1px solid var(--error-border);
+      font-size: .85rem;
+    }
 
     /* ── MESSAGES ── */
     .messages {
@@ -464,56 +464,54 @@
 
   <div class="section-label">Sobe</div>
   <div id="room-action-msg"></div>
-    <div class="room-forms">
-  <!-- USTVARI -->
-  <form id="create-room-form"
-        hx-post="/rooms"
-        hx-target="#room-action-msg"
-        hx-swap="innerHTML">
-    <div class="form-group">
-      <label for="room-name" class="form-label">Nova soba</label>
-      <div class="form-row">
-        <input type="text"
-               id="room-name"
-               name="name"
-               placeholder="Ime sobe"
-               maxlength="32"
-               pattern="[A-Za-z0-9_-]+"
-               required
-               aria-label="Ime nove sobe">
-        <button type="submit" aria-label="Ustvari sobo">＋</button>
+  <div class="room-forms">
+    <!-- USTVARI -->
+    <form id="create-room-form"
+          hx-post="/rooms"
+          hx-target="#room-action-msg"
+          hx-swap="innerHTML">
+      <div class="form-group">
+        <label for="room-name" class="form-label">Nova soba</label>
+        <div class="form-row">
+          <input type="text"
+                 id="room-name"
+                 name="name"
+                 placeholder="Ime sobe"
+                 maxlength="32"
+                 pattern="[A-Za-z0-9_-]+"
+                 required
+                 aria-label="Ime nove sobe">
+          <button type="submit" aria-label="Ustvari sobo">＋</button>
+        </div>
       </div>
-    </div>
-  </form>
+    </form>
 
-  <!-- PRIDRUŽI SE -->
-  <form id="join-room-form"
-        hx-post="/rooms/join"
-        hx-target="#room-action-msg"
-        hx-swap="innerHTML">
-    <div class="form-group">
-      <label for="room-id" class="form-label">Pridruži se</label>
-      <div class="form-row">
-        <input type="number"
-               id="room-id"
-               name="id"
-               placeholder="ID sobe"
-               required
-               aria-label="ID sobe">
-        <button type="submit" aria-label="Pridruži se">🔗</button>
+    <!-- PRIDRUŽI SE -->
+    <form id="join-room-form"
+          hx-post="/rooms/join"
+          hx-target="#room-action-msg"
+          hx-swap="innerHTML">
+      <div class="form-group">
+        <label for="room-id" class="form-label">Pridruži se</label>
+        <div class="form-row">
+          <input type="number"
+                 id="room-id"
+                 name="id"
+                 placeholder="ID sobe"
+                 required
+                 aria-label="ID sobe">
+          <button type="submit" aria-label="Pridruži se">🔗</button>
+        </div>
       </div>
-    </div>
-  </form>
-</div>
-
-  
+    </form>
+  </div>
 
   <div class="room-list"
-     id="room-list"
-     hx-get="/rooms"
-     hx-trigger="load"
-     hx-swap="innerHTML">
-   </div>
+       id="room-list"
+       hx-get="/rooms"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+  </div>
 
 
   <div class="sidebar-footer">

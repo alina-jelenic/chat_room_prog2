@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ChatRoom — Prijava / Ustvari račun</title>
+  <title>ChatRoom — Prijava in registracija</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
@@ -107,7 +107,7 @@
 <body>
 <div class="card">
   <div class="wordmark">ChatRoom</div>
-  <div class="tagline">Real-time conversations</div>
+  <div class="tagline">Pogovori v realnem času</div>
 
   <input type="radio" id="login-tab"    name="auth-tab" class="tab-input" checked>
   <input type="radio" id="register-tab" name="auth-tab" class="tab-input">
@@ -167,13 +167,15 @@
       <div class="field">
         <label for="reg-password">Geslo</label>
         <input id="reg-password" name="password" type="password"
-               placeholder="min. 6 znakov" autocomplete="new-password" required>
+               placeholder="min. 6 znakov" autocomplete="new-password"
+               minlength="6" required>
       </div>
 
       <div class="field">
         <label for="reg-confirm">Potrdi geslo</label>
         <input id="reg-confirm" name="confirm" type="password"
-               placeholder="ponovi geslo" autocomplete="new-password" required>
+               placeholder="ponovi geslo" autocomplete="new-password"
+               minlength="6" required>
       </div>
 
       <button class="btn" type="submit">

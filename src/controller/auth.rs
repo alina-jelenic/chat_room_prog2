@@ -41,7 +41,7 @@ pub fn create_jwt(user_id: i32, username: &str, secret: &str) -> Result<String, 
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| AppError(format!("Napaka pri ustvarjanju JWT tokena: {e}")))
+    .map_err(|e| AppError(format!("Napaka pri ustvarjanju žetona JWT: {e}")))
 }
 
 pub fn verify_jwt(token: &str, secret: &str) -> Option<Claims> {

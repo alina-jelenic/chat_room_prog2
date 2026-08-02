@@ -8,7 +8,7 @@ use axum::{
 };
 use chat_room_prog2::{
     controller::{
-        auth::{SESSION_COOKIE, create_jwt, validate_jwt_secret, verify_jwt},
+        auth::{Claims, SESSION_COOKIE, create_jwt, validate_jwt_secret, verify_jwt},
         forms::{normalize_username, verify_password},
         rooms::{ensure_default_room, prepare_database_schema},
         tipi::ServerState,
@@ -21,6 +21,7 @@ use chat_room_prog2::{
     },
 };
 use futures_util::{SinkExt, StreamExt};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
@@ -151,6 +152,23 @@ fn jwt_secret_and_signature_are_validated() {
     assert!(verify_jwt("to-ni-jwt", TEST_SECRET).is_none());
 }
 
+#[test]
+fn expired_jwt_is_rejected() {
+    let expired_claims = Claims {
+        sub: 1,
+        username: "alina".to_string(),
+        exp: 1,
+    };
+    let token = encode(
+        &Header::default(),
+        &expired_claims,
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .unwrap();
+
+    assert!(verify_jwt(&token, TEST_SECRET).is_none());
+}
+
 #[tokio::test]
 async fn migrations_and_default_room_are_idempotent() {
     let (_app, db) = test_app().await;
@@ -214,6 +232,74 @@ async fn migrations_preserve_data_from_a_populated_legacy_database() {
     assert_eq!(legacy_message.content, "staro sporocilo");
     assert_eq!(legacy_message.sender_id, Some(1));
     assert_eq!(legacy_message.soba_id, general.id);
+}
+
+#[tokio::test]
+async fn messages_survive_reopening_a_file_database() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let database_path = std::env::temp_dir().join(format!(
+        "chat-room-prog2-{}-{unique}.db",
+        std::process::id()
+    ));
+    let database_url = format!("sqlite://{}?mode=rwc", database_path.to_string_lossy());
+
+    let mut options = ConnectOptions::new(&database_url);
+    options.max_connections(1).sqlx_logging(false);
+    let db = Database::connect(options).await.unwrap();
+    prepare_database_schema(&db).await.unwrap();
+    ensure_default_room(&db).await.unwrap();
+
+    let state = ServerState::new(db.clone(), TEST_SECRET.to_string());
+    let app = build_router(state);
+    let cookie = register_and_login(&app, "alina").await;
+    let general = Soba::find()
+        .filter(soba::Column::Name.eq("general"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (address, server) = start_server(app).await;
+    let (mut socket, _) = connect_async(websocket_request(address, "general", &cookie))
+        .await
+        .unwrap();
+    socket
+        .send(WsMessage::Text(
+            r#"{"content":"sporočilo po ponovnem zagonu"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut socket, "sporočilo po ponovnem zagonu"),
+    )
+    .await
+    .expect("sporočilo pred ponovnim odpiranjem baze ni bilo prejeto");
+    socket.close(None).await.unwrap();
+    server.abort();
+    let _ = server.await;
+    drop(db);
+
+    let mut reopened_options = ConnectOptions::new(&database_url);
+    reopened_options.max_connections(1).sqlx_logging(false);
+    let reopened = Database::connect(reopened_options).await.unwrap();
+    prepare_database_schema(&reopened).await.unwrap();
+
+    let stored = message::Entity::find()
+        .filter(message::Column::SobaId.eq(general.id))
+        .one(&reopened)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.content, "sporočilo po ponovnem zagonu");
+    drop(reopened);
+
+    let _ = std::fs::remove_file(&database_path);
+    let _ = std::fs::remove_file(database_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(database_path.with_extension("db-wal"));
 }
 
 #[tokio::test]
@@ -567,7 +653,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("še nisi pridružen"));
+    assert!(body_text(response).await.contains("še nimaš dostopa"));
 
     let response = app
         .clone()
@@ -612,7 +698,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
     assert!(
         body_text(response)
             .await
-            .contains("Pridružil si se sobi #projekt")
+            .contains("Zdaj si v sobi #projekt")
     );
 
     let member = Client::find()
@@ -647,7 +733,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("že pridružen"));
+    assert!(body_text(response).await.contains("Že si v sobi"));
     assert_eq!(
         RoomMember::find()
             .filter(room_member::Column::SobaId.eq(room.id))
@@ -683,7 +769,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("Lastnik sobe"));
+    assert!(body_text(response).await.contains("kot njen lastnik"));
     assert_eq!(
         RoomMember::find()
             .filter(room_member::Column::SobaId.eq(room.id))
@@ -720,7 +806,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
     assert_eq!(response.status(), StatusCode::OK);
     let panel = body_text(response).await;
     assert!(panel.contains("room_name=general"));
-    assert!(panel.contains("Zapustil si sobo #projekt"));
+    assert!(panel.contains("Nisi več v sobi #projekt"));
     assert!(!panel.contains("data-room-name=\"projekt\""));
     assert_eq!(
         RoomMember::find()
@@ -754,7 +840,7 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("še nisi pridružen"));
+    assert!(body_text(response).await.contains("še nimaš dostopa"));
 
     let response = app
         .clone()
@@ -929,6 +1015,96 @@ async fn websocket_closes_when_user_is_not_a_room_member() {
 }
 
 #[tokio::test]
+async fn websocket_closes_after_member_leaves_the_room() {
+    let (app, db) = test_app().await;
+    let owner_cookie = register_and_login(&app, "alina").await;
+    let member_cookie = register_and_login(&app, "jovan").await;
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "POST",
+            "/rooms",
+            "name=odhod",
+            Some(&owner_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("je ustvarjena"));
+    let room = Soba::find()
+        .filter(soba::Column::Name.eq("odhod"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "POST",
+            "/rooms/join",
+            &format!("id={}", room.id),
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("Zdaj si v sobi"));
+
+    let http_app = app.clone();
+    let (address, server) = start_server(app).await;
+    let (mut socket, _) = connect_async(websocket_request(address, "odhod", &member_cookie))
+        .await
+        .unwrap();
+    socket
+        .send(WsMessage::Text(
+            r#"{"content":"povezava je pripravljena"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut socket, "povezava je pripravljena"),
+    )
+    .await
+    .expect("članov WebSocket ni postal pripravljen");
+
+    message::Entity::delete_many()
+        .filter(message::Column::SobaId.eq(room.id))
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let response = http_app
+        .oneshot(form_request(
+            "DELETE",
+            "/rooms/odhod/membership",
+            "",
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("Nisi več v sobi #odhod"));
+
+    let _ = socket
+        .send(WsMessage::Text(
+            r#"{"content":"tega sporočila ne sme shraniti"}"#.into(),
+        ))
+        .await;
+    wait_for_socket_close(&mut socket).await;
+
+    assert_eq!(
+        message::Entity::find()
+            .filter(message::Column::SobaId.eq(room.id))
+            .count(&db)
+            .await
+            .unwrap(),
+        0
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
 async fn websocket_message_is_authenticated_persisted_and_broadcast() {
     let (app, db) = test_app().await;
     let password_hash = chat_room_prog2::controller::forms::hash_password("skrivnost1").unwrap();
@@ -1011,6 +1187,22 @@ where
     }
 }
 
+async fn wait_for_socket_close<S>(socket: &mut S)
+where
+    S: futures_util::Stream<Item = Result<WsMessage, WsError>> + Unpin,
+{
+    timeout(Duration::from_secs(2), async {
+        loop {
+            match socket.next().await {
+                None | Some(Ok(WsMessage::Close(_))) | Some(Err(_)) => break,
+                Some(Ok(_)) => continue,
+            }
+        }
+    })
+    .await
+    .expect("strežnik ni pravočasno zaprl WebSocket povezave");
+}
+
 #[tokio::test]
 async fn websocket_broadcast_reaches_two_joined_users() {
     let (app, db) = test_app().await;
@@ -1045,7 +1237,7 @@ async fn websocket_broadcast_reaches_two_joined_users() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("Pridružil si se"));
+    assert!(body_text(response).await.contains("Zdaj si v sobi"));
 
     let (address, server) = start_server(app).await;
     let (mut owner_socket, _) = connect_async(websocket_request(address, "skupina", &owner_cookie))
@@ -1060,7 +1252,7 @@ async fn websocket_broadcast_reaches_two_joined_users() {
     // Z dvema kratkima sporočiloma zato najprej deterministično preverimo, da
     // sta oba odjemalca zares pripravljena, in se izognemo časovno občutljivemu testu.
     // `recv_until` bere naprej, dokler ne najde iskanega niza, in tako ne pusti
-    // za sabo neprebranih "reset textarea" frame-ov, ki bi zmedli poznejše branje.
+    // neprebranih okvirjev za ponastavitev vnosnega polja, ki bi zmedli poznejše branje.
     owner_socket
         .send(WsMessage::Text(r#"{"content":"owner-ready"}"#.into()))
         .await
@@ -1128,5 +1320,134 @@ async fn websocket_broadcast_reaches_two_joined_users() {
 
     owner_socket.close(None).await.unwrap();
     member_socket.close(None).await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn deleting_a_room_notifies_connected_users_and_blocks_further_messages() {
+    let (app, db) = test_app().await;
+    let owner_cookie = register_and_login(&app, "alina").await;
+    let member_cookie = register_and_login(&app, "jovan").await;
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "POST",
+            "/rooms",
+            "name=brisanje",
+            Some(&owner_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("je ustvarjena"));
+    let room = Soba::find()
+        .filter(soba::Column::Name.eq("brisanje"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "POST",
+            "/rooms/join",
+            &format!("id={}", room.id),
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("Zdaj si v sobi"));
+
+    let http_app = app.clone();
+    let (address, server) = start_server(app).await;
+    let (mut owner_socket, _) =
+        connect_async(websocket_request(address, "brisanje", &owner_cookie))
+            .await
+            .unwrap();
+    let (mut member_socket, _) =
+        connect_async(websocket_request(address, "brisanje", &member_cookie))
+            .await
+            .unwrap();
+
+    owner_socket
+        .send(WsMessage::Text(r#"{"content":"owner-ready"}"#.into()))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "owner-ready"),
+    )
+    .await
+    .expect("lastnikov WebSocket ni postal pripravljen");
+
+    member_socket
+        .send(WsMessage::Text(r#"{"content":"member-ready"}"#.into()))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "member-ready"),
+    )
+    .await
+    .expect("članov WebSocket ni postal pripravljen");
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "member-ready"),
+    )
+    .await
+    .expect("lastnik ni prejel članovega pripravljalnega sporočila");
+
+    message::Entity::delete_many()
+        .filter(message::Column::SobaId.eq(room.id))
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let response = http_app
+        .oneshot(form_request(
+            "DELETE",
+            "/rooms/brisanje",
+            "",
+            Some(&owner_cookie),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let owner_notification = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "je bila izbrisana"),
+    )
+    .await
+    .expect("lastnik ni prejel obvestila o izbrisu");
+    let member_notification = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "je bila izbrisana"),
+    )
+    .await
+    .expect("član ni prejel obvestila o izbrisu");
+
+    for notification in [owner_notification, member_notification] {
+        assert!(notification.contains("hx-get=\"/rooms/general/panel\""));
+        assert!(notification.contains("id=\"room-list\""));
+    }
+
+    let _ = owner_socket
+        .send(WsMessage::Text(
+            r#"{"content":"sporočilo po izbrisu lastnika"}"#.into(),
+        ))
+        .await;
+    let _ = member_socket
+        .send(WsMessage::Text(
+            r#"{"content":"sporočilo po izbrisu člana"}"#.into(),
+        ))
+        .await;
+    wait_for_socket_close(&mut owner_socket).await;
+    wait_for_socket_close(&mut member_socket).await;
+
+    assert!(Soba::find_by_id(room.id).one(&db).await.unwrap().is_none());
+    assert_eq!(message::Entity::find().count(&db).await.unwrap(), 0);
+
     server.abort();
 }
