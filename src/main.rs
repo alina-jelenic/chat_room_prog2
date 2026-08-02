@@ -12,8 +12,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Preberemo .env, če obstaja. To omogoča, da URL baze zamenjamo brez spremembe kode.
     dotenvy::dotenv().ok();
 
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
+    let database_url =
+        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
     let jwt_secret = env::var("JWT_SECRET")
         .map_err(|_| "JWT_SECRET ni nastavljen. Kopiraj .env.example v .env.")?;
     validate_jwt_secret(&jwt_secret)?;

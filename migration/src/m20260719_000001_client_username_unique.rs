@@ -21,11 +21,7 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_index(
-                Index::drop()
-                    .name("idx-client-username-unique")
-                    .to_owned(),
-            )
+            .drop_index(Index::drop().name("idx-client-username-unique").to_owned())
             .await
     }
 }

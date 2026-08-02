@@ -1,5 +1,5 @@
-use crate::controller::web::AppError;
 use crate::controller::tipi::SharedState;
+use crate::controller::web::AppError;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -88,7 +88,7 @@ pub fn removal_cookie() -> Cookie<'static> {
 }
 
 pub fn redirect_to_login() -> Response {
-    ([ ("HX-Redirect", "/authorisation.html") ], Html("")).into_response()
+    ([("HX-Redirect", "/authorisation.html")], Html("")).into_response()
 }
 
 pub async fn me_handler(jar: CookieJar, State(state): State<SharedState>) -> Response {
@@ -105,7 +105,7 @@ pub async fn me_handler(jar: CookieJar, State(state): State<SharedState>) -> Res
 
 pub async fn logout_handler(jar: CookieJar) -> Response {
     let jar = jar.remove(removal_cookie());
-    (jar, [ ("HX-Redirect", "/authorisation.html") ], Html("")).into_response()
+    (jar, [("HX-Redirect", "/authorisation.html")], Html("")).into_response()
 }
 
 fn render_user_pill(username: &str) -> String {

@@ -11,12 +11,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Soba::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Soba::Id)
-                        .integer()
-                        .not_null()
-                        .primary_key()
-                    )
+                    .col(ColumnDef::new(Soba::Id).integer().not_null().primary_key())
                     .col(string(Soba::Name))
                     .to_owned(),
             )

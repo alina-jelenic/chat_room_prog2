@@ -55,9 +55,7 @@ pub fn normalize_username(username: &str) -> Result<String, String> {
     }
 
     if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') {
-        return Err(
-            "Uporabniško ime lahko vsebuje samo črke, številke, '-' in '_'.".to_string(),
-        );
+        return Err("Uporabniško ime lahko vsebuje samo črke, številke, '-' in '_'.".to_string());
     }
 
     Ok(clean)
@@ -114,7 +112,8 @@ pub async fn register_handler(
 
     if form.password != form.confirm {
         return Ok(Html(
-            r#"<div id="register-msg" class="server-msg error">Gesli se ne ujemata.</div>"#.to_string(),
+            r#"<div id="register-msg" class="server-msg error">Gesli se ne ujemata.</div>"#
+                .to_string(),
         ));
     }
 
@@ -173,7 +172,10 @@ pub fn hash_password(password: &str) -> Result<String, String> {
 }
 
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
-    let parsed_hash = PasswordHash::new(hash).map_err(|e| e.to_string())?;
+    let parsed_hash = match PasswordHash::new(hash) {
+        Ok(hash) => hash,
+        Err(_) => return Ok(false),
+    };
 
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)

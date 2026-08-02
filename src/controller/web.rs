@@ -69,9 +69,10 @@ struct WsIncomingMessage {
 
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
     let app = build_router(state);
+    let server_addr = std::env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
-    println!("WebSocket chat posluša na ws://127.0.0.1:3000/ws?room_name=general");
+    let listener = tokio::net::TcpListener::bind(&server_addr).await?;
+    println!("ChatRoom posluša na http://{server_addr}");
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -89,6 +90,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
         .route("/rooms/{name}/panel", get(rooms::room_panel))
         .route("/rooms/{name}/messages", get(rooms::list_messages))
+        .route(
+            "/rooms/{name}/membership",
+            axum::routing::delete(rooms::leave_room),
+        )
         .route("/rooms/{name}", axum::routing::delete(rooms::delete_room))
         .route("/rooms/join", post(rooms::join_room))
         .fallback_service(ServeDir::new("static"))

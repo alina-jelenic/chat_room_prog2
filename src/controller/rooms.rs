@@ -137,11 +137,7 @@ async fn ensure_room_exists(
     unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
-async fn ensure_room_membership<C>(
-    db: &C,
-    room_id: i32,
-    user_id: i32,
-) -> Result<bool, AppError>
+async fn ensure_room_membership<C>(db: &C, room_id: i32, user_id: i32) -> Result<bool, AppError>
 where
     C: ConnectionTrait,
 {
@@ -198,14 +194,14 @@ async fn create_owned_room(
 ) -> Result<soba::Model, AppError> {
     use rand::Rng;
 
-let code = {
-    let mut rng = rand::thread_rng();
-    rng.gen_range(100000..=999999)
-};
+    let code = {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(100000..=999999)
+    };
 
-let transaction = db.begin().await?;
-let room = soba::ActiveModel {
-    id: Set(code),
+    let transaction = db.begin().await?;
+    let room = soba::ActiveModel {
+        id: Set(code),
         name: Set(name),
         owner_id: Set(Some(owner_id)),
         ..Default::default()
@@ -282,10 +278,8 @@ pub async fn create_room(
 
     let room = create_owned_room(&db, clean_name, user.id).await?;
     let room_list = render_room_list(&db, user.id, &room.name).await?;
-    let mut html = render_room_action_message(
-        "success",
-        &format!("Soba #{} je ustvarjena.", room.name),
-    );
+    let mut html =
+        render_room_action_message("success", &format!("Soba #{} je ustvarjena.", room.name));
     html.push_str(&render_chat_panel_oob(&room, &user));
     html.push_str(&render_room_list_oob(&room_list));
 
@@ -356,7 +350,12 @@ pub async fn join_room(
         .await?
     {
         Some(room) => room,
-        None => return Ok(room_action_response("error", "Soba s tem ID-jem ne obstaja.")),
+        None => {
+            return Ok(room_action_response(
+                "error",
+                "Soba s tem ID-jem ne obstaja.",
+            ))
+        }
     };
 
     let joined_now = if room.name == "general" {
@@ -379,12 +378,73 @@ pub async fn join_room(
         format!("Sobi #{} si že pridružen.", room.name)
     };
 
-    let mut html = render_room_action_message(
-        if joined_now { "success" } else { "info" },
-        &message,
-    );
+    let mut html =
+        render_room_action_message(if joined_now { "success" } else { "info" }, &message);
     html.push_str(&render_chat_panel_oob(&room, &user));
     html.push_str(&render_room_list_oob(&room_list));
+    Ok(Html(html).into_response())
+}
+
+pub async fn leave_room(
+    jar: CookieJar,
+    State(state): State<SharedState>,
+    Path(room_name): Path<String>,
+) -> Result<Response, AppError> {
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
+
+    let clean_name = match normalize_room_name(&room_name) {
+        Ok(name) => name,
+        Err(error) => return Ok(room_action_retarget_response("error", &error.0)),
+    };
+    if clean_name == "general" {
+        return Ok(room_action_retarget_response(
+            "error",
+            "Sobe general ni mogoče zapustiti.",
+        ));
+    }
+
+    let db = db_from_state(&state)?;
+    let room = match room_for_websocket(&db, &clean_name).await? {
+        Some(room) => room,
+        None => {
+            return Ok(room_action_retarget_response(
+                "error",
+                "Soba ne obstaja ali je bila že izbrisana.",
+            ))
+        }
+    };
+
+    if room.owner_id == Some(user.id) {
+        return Ok(room_action_retarget_response(
+            "error",
+            "Lastnik sobe je ne more zapustiti; lahko jo izbriše.",
+        ));
+    }
+
+    let result = RoomMember::delete_many()
+        .filter(room_member::Column::SobaId.eq(room.id))
+        .filter(room_member::Column::ClientId.eq(user.id))
+        .exec(&db)
+        .await?;
+    if result.rows_affected == 0 {
+        return Ok(room_action_retarget_response(
+            "error",
+            "Tej sobi nisi pridružen.",
+        ));
+    }
+
+    let general = ensure_room_exists(&db, "general", None).await?;
+    let room_list = render_room_list(&db, user.id, &general.name).await?;
+    let mut html = render_chat_panel(&general, &user);
+    html.push_str(&render_room_list_oob(&room_list));
+    html.push_str(&render_room_action_message_oob(
+        "success",
+        &format!("Zapustil si sobo #{}.", room.name),
+    ));
+
     Ok(Html(html).into_response())
 }
 
@@ -494,9 +554,12 @@ pub async fn create_websocket_message(
     }
 
     let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
-    Ok(render_message_oob(&msg, Some(&user.username), msg.timestamp))
+    Ok(render_message_oob(
+        &msg,
+        Some(&user.username),
+        msg.timestamp,
+    ))
 }
-
 
 async fn render_room_list(
     db: &DatabaseConnection,
@@ -659,9 +722,9 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
     } else {
         ""
     };
-    let delete_control = if room.name == "general" || room.owner_id != Some(user.id) {
+    let room_control = if room.name == "general" {
         String::new()
-    } else {
+    } else if room.owner_id == Some(user.id) {
         format!(
             r##"<button type="button" class="delete-room-btn"
                 hx-delete="/rooms/{name}"
@@ -669,6 +732,16 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
                 hx-swap="outerHTML"
                 hx-confirm="Ali res želiš izbrisati sobo #{name} in vsa njena sporočila?">
               Izbriši sobo
+            </button>"##
+        )
+    } else {
+        format!(
+            r##"<button type="button" class="leave-room-btn"
+                hx-delete="/rooms/{name}/membership"
+                hx-target="#chat-panel"
+                hx-swap="outerHTML"
+                hx-confirm="Ali res želiš zapustiti sobo #{name}?">
+              Zapusti sobo
             </button>"##
         )
     };
@@ -682,10 +755,8 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
-    <span class="room-id">ID: {id} <button type="button" class="copy-id-btn" onclick="navigator.clipboard.writeText('{id}')" title="Kopiraj ID sobe">
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M3 10.5V3a1 1 0 0 1 1-1h7.5" stroke="currentColor" stroke-width="1.3"/></svg>
-    </button></span>
-    {delete_control}
+    <span class="room-id">ID: {id}</span>
+    {room_control}
 </div>
 
   <div class="messages" id="messages"
@@ -713,13 +784,20 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
         username = username,
         user_id = user.id,
         oob_attribute = oob_attribute,
-        delete_control = delete_control,
+        room_control = room_control,
         max_message_length = MAX_MESSAGE_LENGTH,
     )
 }
 
 fn render_room_list_oob(room_list: &str) -> String {
     format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)
+}
+
+fn render_room_action_message_oob(kind: &str, message: &str) -> String {
+    format!(
+        r#"<div id="room-action-msg" hx-swap-oob="innerHTML">{}</div>"#,
+        render_room_action_message(kind, message)
+    )
 }
 
 fn render_room_list_reload_oob() -> String {

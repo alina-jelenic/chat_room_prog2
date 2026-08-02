@@ -21,9 +21,10 @@ use chat_room_prog2::{
     },
 };
 use futures_util::{SinkExt, StreamExt};
+use migration::{Migrator, MigratorTrait};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+    EntityTrait, PaginatorTrait, QueryFilter, Set,
 };
 use std::net::SocketAddr;
 use tokio::time::{timeout, Duration};
@@ -97,9 +98,7 @@ async fn register_and_login(app: &Router, username: &str) -> String {
 }
 
 async fn start_server(app: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -107,7 +106,11 @@ async fn start_server(app: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) 
     (address, server)
 }
 
-fn websocket_request(address: SocketAddr, room_name: &str, cookie: &str) -> axum::http::Request<()> {
+fn websocket_request(
+    address: SocketAddr,
+    room_name: &str,
+    cookie: &str,
+) -> axum::http::Request<()> {
     let mut request = format!("ws://{address}/ws?room_name={room_name}")
         .into_client_request()
         .unwrap();
@@ -144,11 +147,7 @@ fn jwt_secret_and_signature_are_validated() {
     let claims = verify_jwt(&token, TEST_SECRET).unwrap();
     assert_eq!(claims.sub, 1);
     assert_eq!(claims.username, "alina");
-    assert!(verify_jwt(
-        &token,
-        "a-different-secret-that-is-also-long-enough"
-    )
-    .is_none());
+    assert!(verify_jwt(&token, "a-different-secret-that-is-also-long-enough").is_none());
     assert!(verify_jwt("to-ni-jwt", TEST_SECRET).is_none());
 }
 
@@ -171,6 +170,53 @@ async fn migrations_and_default_room_are_idempotent() {
 }
 
 #[tokio::test]
+async fn migrations_preserve_data_from_a_populated_legacy_database() {
+    let mut options = ConnectOptions::new("sqlite::memory:");
+    options.max_connections(1).sqlx_logging(false);
+    let db = Database::connect(options).await.unwrap();
+
+    // Prve tri migracije predstavljajo staro različico baze: uporabnik še nima
+    // gesla, sporočilo pa še ni povezano s sobo.
+    Migrator::up(&db, Some(3)).await.unwrap();
+    db.execute_unprepared("INSERT INTO client (id, username) VALUES (1, 'stari_uporabnik')")
+        .await
+        .unwrap();
+    db.execute_unprepared("INSERT INTO soba (id, name) VALUES (123456, 'stara_soba')")
+        .await
+        .unwrap();
+    db.execute_unprepared(
+        "INSERT INTO message (id, sender_id, content, timestamp) \
+         VALUES (1, 1, 'staro sporocilo', 1700000000)",
+    )
+    .await
+    .unwrap();
+
+    prepare_database_schema(&db).await.unwrap();
+
+    let legacy_user = Client::find_by_id(1).one(&db).await.unwrap().unwrap();
+    assert_eq!(legacy_user.username, "stari_uporabnik");
+    assert_eq!(legacy_user.geslo, "");
+    assert!(!verify_password("karkoli", &legacy_user.geslo).unwrap());
+
+    let general = Soba::find()
+        .filter(soba::Column::Name.eq("general"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(Soba::find_by_id(123456).one(&db).await.unwrap().is_some());
+
+    let legacy_message = message::Entity::find_by_id(1)
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(legacy_message.content, "staro sporocilo");
+    assert_eq!(legacy_message.sender_id, Some(1));
+    assert_eq!(legacy_message.soba_id, general.id);
+}
+
+#[tokio::test]
 async fn protected_http_endpoints_require_a_valid_session() {
     let (app, _db) = test_app().await;
 
@@ -181,6 +227,7 @@ async fn protected_http_endpoints_require_a_valid_session() {
         form_request("GET", "/rooms/general/messages", "", None),
         form_request("POST", "/rooms", "name=skrivna", None),
         form_request("POST", "/rooms/join", "id=123456", None),
+        form_request("DELETE", "/rooms/skrivna/membership", "", None),
         form_request("DELETE", "/rooms/skrivna", "", None),
     ] {
         let response = app.clone().oneshot(request).await.unwrap();
@@ -308,6 +355,9 @@ async fn registration_login_room_panel_and_deletion_work_together() {
     assert!(panel.contains("ws-connect=\"/ws?room_name=rust\""));
     assert!(!panel.contains("username=gost"));
     assert!(panel.contains("hx-delete=\"/rooms/rust\""));
+    assert!(!panel.contains("hx-delete=\"/rooms/rust/membership\""));
+    assert!(!panel.contains("copy-id-btn"));
+    assert!(!panel.contains("onclick="));
 
     let room = chat_room_prog2::entities::prelude::Soba::find()
         .filter(chat_room_prog2::entities::soba::Column::Name.eq("rust"))
@@ -423,7 +473,9 @@ async fn invalid_and_duplicate_room_names_do_not_create_rooms() {
             .oneshot(form_request("POST", "/rooms", body, Some(&cookie)))
             .await
             .unwrap();
-        assert!(body_text(response).await.contains("room-action-message error"));
+        assert!(body_text(response)
+            .await
+            .contains("room-action-message error"));
     }
     assert_eq!(Soba::find().count(&db).await.unwrap(), 1);
 
@@ -495,7 +547,9 @@ async fn room_membership_controls_listing_history_and_deletion() {
         .oneshot(form_request("GET", "/rooms", "", Some(&member_cookie)))
         .await
         .unwrap();
-    assert!(!body_text(response).await.contains("data-room-name=\"projekt\""));
+    assert!(!body_text(response)
+        .await
+        .contains("data-room-name=\"projekt\""));
 
     let response = app
         .clone()
@@ -532,7 +586,9 @@ async fn room_membership_controls_listing_history_and_deletion() {
             ))
             .await
             .unwrap();
-        assert!(body_text(response).await.contains("room-action-message error"));
+        assert!(body_text(response)
+            .await
+            .contains("room-action-message error"));
     }
 
     let response = app
@@ -545,10 +601,18 @@ async fn room_membership_controls_listing_history_and_deletion() {
         ))
         .await
         .unwrap();
-    assert!(body_text(response).await.contains("Pridružil si se sobi #projekt"));
+    assert!(body_text(response)
+        .await
+        .contains("Pridružil si se sobi #projekt"));
 
     let member = Client::find()
         .filter(client::Column::Username.eq("jovan"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let owner = Client::find()
+        .filter(client::Column::Username.eq("alina"))
         .one(&db)
         .await
         .unwrap()
@@ -597,6 +661,28 @@ async fn room_membership_controls_listing_history_and_deletion() {
     let panel = body_text(response).await;
     assert!(panel.contains("data-current-username=\"jovan\""));
     assert!(!panel.contains("hx-delete=\"/rooms/projekt\""));
+    assert!(panel.contains("hx-delete=\"/rooms/projekt/membership\""));
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "DELETE",
+            "/rooms/projekt/membership",
+            "",
+            Some(&owner_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("Lastnik sobe"));
+    assert_eq!(
+        RoomMember::find()
+            .filter(room_member::Column::SobaId.eq(room.id))
+            .filter(room_member::Column::ClientId.eq(owner.id))
+            .count(&db)
+            .await
+            .unwrap(),
+        1
+    );
 
     let response = app
         .clone()
@@ -610,6 +696,55 @@ async fn room_membership_controls_listing_history_and_deletion() {
         .unwrap();
     assert!(body_text(response).await.contains("lahko izbriše samo"));
     assert!(Soba::find_by_id(room.id).one(&db).await.unwrap().is_some());
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "DELETE",
+            "/rooms/projekt/membership",
+            "",
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let panel = body_text(response).await;
+    assert!(panel.contains("room_name=general"));
+    assert!(panel.contains("Zapustil si sobo #projekt"));
+    assert!(!panel.contains("data-room-name=\"projekt\""));
+    assert_eq!(
+        RoomMember::find()
+            .filter(room_member::Column::SobaId.eq(room.id))
+            .filter(room_member::Column::ClientId.eq(member.id))
+            .count(&db)
+            .await
+            .unwrap(),
+        0
+    );
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "GET",
+            "/rooms/projekt/messages",
+            "",
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .clone()
+        .oneshot(form_request(
+            "GET",
+            "/rooms/projekt/panel",
+            "",
+            Some(&member_cookie),
+        ))
+        .await
+        .unwrap();
+    assert!(body_text(response).await.contains("še nisi pridružen"));
 
     let response = app
         .clone()
@@ -722,7 +857,10 @@ async fn websocket_rejects_missing_and_invalid_sessions() {
     };
     match error {
         WsError::Http(response) => {
-            assert_eq!(response.status().as_u16(), StatusCode::UNAUTHORIZED.as_u16())
+            assert_eq!(
+                response.status().as_u16(),
+                StatusCode::UNAUTHORIZED.as_u16()
+            )
         }
         other => panic!("pričakovan je bil HTTP 401, dobljeno: {other}"),
     }
@@ -734,7 +872,10 @@ async fn websocket_rejects_missing_and_invalid_sessions() {
     };
     match error {
         WsError::Http(response) => {
-            assert_eq!(response.status().as_u16(), StatusCode::UNAUTHORIZED.as_u16())
+            assert_eq!(
+                response.status().as_u16(),
+                StatusCode::UNAUTHORIZED.as_u16()
+            )
         }
         other => panic!("pričakovan je bil HTTP 401, dobljeno: {other}"),
     }
@@ -761,10 +902,9 @@ async fn websocket_closes_when_user_is_not_a_room_member() {
     assert!(body_text(response).await.contains("je ustvarjena"));
 
     let (address, server) = start_server(app).await;
-    let (mut socket, _) =
-        connect_async(websocket_request(address, "zasebna", &outsider_cookie))
-            .await
-            .unwrap();
+    let (mut socket, _) = connect_async(websocket_request(address, "zasebna", &outsider_cookie))
+        .await
+        .unwrap();
 
     let outcome = timeout(Duration::from_secs(2), socket.next())
         .await
@@ -825,11 +965,18 @@ async fn websocket_message_is_authenticated_persisted_and_broadcast() {
     assert!(received.contains("pozdrav iz websocket testa"));
     assert!(received.contains("jovan"));
 
-    let stored = message::Entity::find()
-        .one(&db)
+    let reset = timeout(Duration::from_secs(2), socket.next())
         .await
+        .expect("strežnik ni pravočasno počistil vnosnega polja")
+        .expect("WebSocket se je nepričakovano zaprl")
         .unwrap()
+        .into_text()
         .unwrap();
+    assert!(reset.contains("id=\"msg-input\""));
+    assert!(reset.contains("hx-swap-oob=\"true\""));
+    assert!(!reset.contains("pozdrav iz websocket testa"));
+
+    let stored = message::Entity::find().one(&db).await.unwrap().unwrap();
     assert_eq!(stored.content, "pozdrav iz websocket testa");
     assert_eq!(message::Entity::find().count(&db).await.unwrap(), 1);
 
@@ -891,10 +1038,9 @@ async fn websocket_broadcast_reaches_two_joined_users() {
     assert!(body_text(response).await.contains("Pridružil si se"));
 
     let (address, server) = start_server(app).await;
-    let (mut owner_socket, _) =
-        connect_async(websocket_request(address, "skupina", &owner_cookie))
-            .await
-            .unwrap();
+    let (mut owner_socket, _) = connect_async(websocket_request(address, "skupina", &owner_cookie))
+        .await
+        .unwrap();
     let (mut member_socket, _) =
         connect_async(websocket_request(address, "skupina", &member_cookie))
             .await
@@ -906,27 +1052,32 @@ async fn websocket_broadcast_reaches_two_joined_users() {
     // `recv_until` bere naprej, dokler ne najde iskanega niza, in tako ne pusti
     // za sabo neprebranih "reset textarea" frame-ov, ki bi zmedli poznejše branje.
     owner_socket
-        .send(WsMessage::Text(
-            r#"{"content":"owner-ready"}"#.into(),
-        ))
+        .send(WsMessage::Text(r#"{"content":"owner-ready"}"#.into()))
         .await
         .unwrap();
-    timeout(Duration::from_secs(2), recv_until(&mut owner_socket, "owner-ready"))
-        .await
-        .expect("lastnikov WebSocket ni postal pripravljen");
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "owner-ready"),
+    )
+    .await
+    .expect("lastnikov WebSocket ni postal pripravljen");
 
     member_socket
-        .send(WsMessage::Text(
-            r#"{"content":"member-ready"}"#.into(),
-        ))
+        .send(WsMessage::Text(r#"{"content":"member-ready"}"#.into()))
         .await
         .unwrap();
-    timeout(Duration::from_secs(2), recv_until(&mut member_socket, "member-ready"))
-        .await
-        .expect("članov WebSocket ni postal pripravljen");
-    timeout(Duration::from_secs(2), recv_until(&mut owner_socket, "member-ready"))
-        .await
-        .expect("lastnik ni prejel potrditve članove pripravljenosti");
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "member-ready"),
+    )
+    .await
+    .expect("članov WebSocket ni postal pripravljen");
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut owner_socket, "member-ready"),
+    )
+    .await
+    .expect("lastnik ni prejel potrditve članove pripravljenosti");
 
     message::Entity::delete_many()
         .filter(message::Column::SobaId.eq(room.id))
@@ -935,9 +1086,7 @@ async fn websocket_broadcast_reaches_two_joined_users() {
         .unwrap();
 
     member_socket
-        .send(WsMessage::Text(
-            r#"{"content":"sporočilo za oba"}"#.into(),
-        ))
+        .send(WsMessage::Text(r#"{"content":"sporočilo za oba"}"#.into()))
         .await
         .unwrap();
 
