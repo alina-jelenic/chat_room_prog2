@@ -65,6 +65,8 @@ pub fn auth_user_from_jar(jar: &CookieJar, secret: &str) -> Option<AuthUser> {
     })
 }
 
+// Axumov Response namenoma vrnemo neposredno, ker vsebuje tudi HX-Redirect glavo.
+#[allow(clippy::result_large_err)]
 pub fn require_auth(jar: &CookieJar, secret: &str) -> Result<AuthUser, Response> {
     auth_user_from_jar(jar, secret).ok_or_else(redirect_to_login)
 }

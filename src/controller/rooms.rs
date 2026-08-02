@@ -48,6 +48,8 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
         .clone())
 }
 
+// Axumov Response namenoma vrnemo neposredno, da handler ohrani status in HTMX glave.
+#[allow(clippy::result_large_err)]
 fn authenticated_user(jar: &CookieJar, state: &SharedState) -> Result<AuthUser, Response> {
     let secret = match state.lock() {
         Ok(state) => state.jwt_secret.clone(),
@@ -112,7 +114,6 @@ async fn ensure_room_exists(
             id: Set(code),
             name: Set(clean_name.clone()),
             owner_id: Set(owner_id),
-            ..Default::default()
         }
         .insert(db)
         .await;
@@ -204,7 +205,6 @@ async fn create_owned_room(
         id: Set(code),
         name: Set(name),
         owner_id: Set(Some(owner_id)),
-        ..Default::default()
     }
     .insert(&transaction)
     .await?;
@@ -631,10 +631,8 @@ async fn render_messages_page(
     let mut html = String::new();
 
     // Gumb za nalaganje starejših postavimo na vrh serije.
-    if has_more {
-        if let Some(oldest) = messages.first() {
-            html.push_str(&render_load_older_button(&room.name, oldest.id));
-        }
+    if has_more && let Some(oldest) = messages.first() {
+        html.push_str(&render_load_older_button(&room.name, oldest.id));
     }
 
     if messages.is_empty() && before_id.is_none() {
