@@ -2,7 +2,7 @@
 
 ## Vsebina projekta
 
-V tem projektu bova ustvarila chat-room v realnem času. Z orodji, ki jih ponuja Rust, bova lahko hkrati vodila pogovore z več uporabniki z maksimalno stabilnostjo in varnostjo.
+V tem projektu bova ustvarila chat-room v realnem času. Z orodji, ki jih ponuja Rust, bova lahko hkrati vodila pogovore z več uporabniki z maksimalno (ne)stabilnostjo in (ne)varnostjo.
 
 ## Zakaj sva se odločila za chat-room?
 
@@ -12,29 +12,51 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 
 ## Struktura projekta
 
-├── Cargo.toml # konfiguracija projekta in odvisnosti
+```
+├── Cargo.toml              # konfiguracija glavnega paketa in odvisnosti
+├── README.md                # opis projekta
+├── .env.example              # predloga za okoljske spremenljivke
+├── src/
+│   ├── main.rs                # vstopna točka: povezava z bazo, migracije, zagon strežnika
+│   ├── lib.rs                 # javni moduli knjižnice (controller, entities)
+│   ├── controller/
+│   │   ├── mod.rs               # deklaracija podmodulov
+│   │   ├── auth.rs              # JWT, seje, avtentikacijski middleware
+│   │   ├── forms.rs             # obdelava prijave in registracije
+│   │   ├── rooms.rs             # logika sob: ustvarjanje, pridružitev, sporočila
+│   │   ├── tipi.rs              # deljeno stanje strežnika (SharedState)
+│   │   └── web.rs               # axum router, WebSocket handler
+│   └── entities/                # SeaORM modeli (client, soba, message, room_member)
+├── migration/                 # ločen paket z migracijami (sea-orm-migration)
+│   ├── src/
+│   │   ├── main.rs               # CLI za poganjanje migracij
+│   │   ├── lib.rs                 # seznam vseh migracij
+│   │   └── m*.rs                   # posamezne migracijske datoteke
+│   └── README.md                 # navodila za uporabo migracijskega CLI-ja
+├── static/                    # statične HTML/CSS datoteke frontenda
+│   ├── index.html                # glavni vmesnik klepetalnice
+│   └── authorisation.html         # prijava in registracija
+├── tests/
+│   └── integration.rs            # integracijski testi (HTTP + WebSocket)
+└── .github/workflows/ci.yml    # CI: fmt, clippy, testi
+```
 
-├── README.md # opis projekta
+## Zagon projekta
 
-└── src/
-
-    ├── main.rs # vstopna točka programa (zagon aplikacije)
-
-    │
-
-    ├── server/ # logika strežnika, upravljanje sob in klientov
-
-    │   ├── mod.rs # definicija modula server
-
-    │   └── connection.rs # logika posamezne povezave med uporabniki
-
-    │
-
-    ├── podatkovni tipi/ # user, sobe, sporočila
-
-        └── mod.rs 
-        └── soba.rs
-        └── sporocila.rs
-        └── user.rs
-
+## Glavne funkcionalnosti
+ 
+- **Registracija in prijava** z uporabniškim imenom in geslom; gesla so
+  zgoščena z argon2, seja pa se hrani v HttpOnly piškotku kot JWT žeton.
+- **Klepetalne sobe**: soba `#general` je na voljo vsem, dodatne sobe pa
+  lahko uporabniki ustvarijo (postanejo njihov lastnik) ali se jim
+  pridružijo prek numeričnega ID-ja sobe.
+- **Upravljanje članstva**: pridružitev, zapustitev sobe in brisanje sobe
+  (samo lastnik), z ustreznimi omejitvami dostopa do zasebnih sob.
+- **Sporočila v realnem času** prek WebSocket povezave in HTMX (`ws-send`,
+  `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu.
+- **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
+  (50 na stran), starejša sporočila se naložijo na zahtevo.
+- **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
+  (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
+  starejših, že napolnjenih bazah).
 
