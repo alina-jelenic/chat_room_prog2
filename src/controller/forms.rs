@@ -166,7 +166,6 @@ pub async fn register_handler(
     ))
 }
 
-
 fn invalid_login_response() -> Response {
     Html(r#"<div id="login-msg" class="server-msg error">Napačno ime ali geslo.</div>"#)
         .into_response()
