@@ -771,11 +771,9 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
-    <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}
-    <button data-id="{id}" onclick="navigator.clipboard.writeText(this.dataset.id)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M3 10.5V3a1 1 0 0 1 1-1h7.5" stroke="currentColor" stroke-width="1.3"/></svg></button>
-    </span>
+    <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
     {room_control}
-</div>
+  </div>
 
   <div class="messages" id="messages"
     hx-get="/rooms/{name}/messages"
@@ -806,6 +804,7 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
         max_message_length = MAX_MESSAGE_LENGTH,
     )
 }
+
 
 fn render_room_list_oob(room_list: &str) -> String {
     format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)

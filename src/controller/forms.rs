@@ -152,8 +152,7 @@ pub async fn register_handler(
     .insert(&db)
     .await?;
 
-    Ok(Html(format!(
-    r#"<div id="register-msg" class="server-msg"></div>
+    Ok(Html(format!(r#"<div id="register-msg" class="server-msg"></div>
     <div id="register-kartica" hx-swap-oob="innerHTML" style="text-align:center;">
       <div class="server-msg success" style="display:block; margin-bottom:16px;">
         ✓ Račun je ustvarjen!<br>
