@@ -805,7 +805,6 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
     )
 }
 
-
 fn render_room_list_oob(room_list: &str) -> String {
     format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)
 }
