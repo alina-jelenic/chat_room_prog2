@@ -152,7 +152,7 @@ pub async fn register_handler(
     .insert(&db)
     .await?;
 
-    Ok(Html(format!(
+    Ok(Html(
         r#"<div id="register-msg" class="server-msg"></div>
     <div id="register-kartica" hx-swap-oob="innerHTML" style="text-align:center;">
       <div class="server-msg success" style="display:block; margin-bottom:16px;">
@@ -162,8 +162,10 @@ pub async fn register_handler(
         Pojdi na prijavo
       </label>
     </div>"#
-    )))
+            .to_string(),
+    ))
 }
+
 
 fn invalid_login_response() -> Response {
     Html(r#"<div id="login-msg" class="server-msg error">Napačno ime ali geslo.</div>"#)
