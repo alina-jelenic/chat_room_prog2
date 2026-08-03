@@ -92,6 +92,25 @@
     }
     .btn:hover { background: var(--accent-h); }
 
+    .btn-outline {
+    display: inline-block;
+    padding: 11px 24px;
+    background: var(--success-bg);
+    color: var(--accent);
+    border: 1px solid var(--success-border);
+    border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    font-size: .85rem;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+  }
+  .btn-outline:hover {
+    background: rgba(42,96,73,.12);
+    border-color: var(--accent);
+  }
+
     .server-msg {
       padding: 11px 14px; border-radius: var(--radius); font-size: .83rem;
       margin-bottom: 18px; display: none;
