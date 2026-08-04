@@ -687,10 +687,8 @@ async fn render_messages_page(
     }
 
     // Gumb za starejša sporočila je vizualno na vrhu, torej zadnji v DOM-u.
-    if has_more {
-        if let Some(oldest) = messages.first() {
-            html.push_str(&render_load_older_button(&room.name, oldest.id));
-        }
+    if has_more && let Some(oldest) = messages.first() {
+        html.push_str(&render_load_older_button(&room.name, oldest.id));
     }
 
     Ok(html)
