@@ -646,22 +646,20 @@ async fn render_messages_page(
         .map(|client| (client.id as i64, client.username))
         .collect();
 
-    let mut html = String::new();
-
-    // Gumb za nalaganje starejših postavimo na vrh serije.
-    if has_more && let Some(oldest) = messages.first() {
-        html.push_str(&render_load_older_button(&room.name, oldest.id));
-    }
+    // Bloke (ločila + sporočila) gradimo v kronološkem vrstnem redu,
+    // nato jih obrnemo, ker mora biti v DOM-u najnovejše sporočilo prvo
+    // (zaradi flex-direction: column-reverse v CSS-ju).
+    let mut blocks: Vec<String> = Vec::new();
 
     if messages.is_empty() && before_id.is_none() {
-        html.push_str(&format!(
+        blocks.push(format!(
             r#"<div class="sys-msg">To je začetek pogovora v #{}</div>"#,
             html_escape(&room.name)
         ));
     }
 
     let mut last_date = String::new();
-    for msg in messages {
+    for msg in &messages {
         let sender_name = msg
             .sender_id
             .and_then(|id| sender_map.get(&id))
@@ -674,11 +672,25 @@ async fn render_messages_page(
             .unwrap_or_else(|| "neznan datum".to_string());
 
         if date_str != last_date {
-            html.push_str(&format!(r#"<div class="date-sep">{}</div>"#, date_str));
+            blocks.push(format!(r#"<div class="date-sep">{}</div>"#, date_str));
             last_date = date_str;
         }
 
-        html.push_str(&render_message(&msg, sender_name, msg.timestamp));
+        blocks.push(render_message(msg, sender_name, msg.timestamp));
+    }
+
+    blocks.reverse();
+
+    let mut html = String::new();
+    for block in blocks {
+        html.push_str(&block);
+    }
+
+    // Gumb za starejša sporočila je vizualno na vrhu, torej zadnji v DOM-u.
+    if has_more {
+        if let Some(oldest) = messages.first() {
+            html.push_str(&render_load_older_button(&room.name, oldest.id));
+        }
     }
 
     Ok(html)
@@ -901,7 +913,10 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
         .unwrap_or_else(|| "??:??".to_string());
 
     format!(
-        r#"<div class="msg"><strong>{}</strong> <span class="time">{}</span>: {}</div>"#,
+        r#"<div class="msg">
+  <div class="msg-head"><span class="msg-sender">{}</span><span class="time">{}</span></div>
+  <div class="msg-text">{}</div>
+</div>"#,
         html_escape(sender),
         time_str,
         html_escape(&msg.content)
@@ -910,7 +925,7 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
 
 fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
     format!(
-        r#"<div id="messages" hx-swap-oob="beforeend">{}</div>"#,
+        r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
         render_message(msg, sender_name, timestamp)
     )
 }

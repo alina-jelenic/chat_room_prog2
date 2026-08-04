@@ -53,9 +53,9 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 - **Upravljanje članstva**: pridružitev, zapustitev sobe in brisanje sobe
   (samo lastnik), z ustreznimi omejitvami dostopa do zasebnih sob.
 - **Sporočila v realnem času** prek WebSocket povezave in HTMX (`ws-send`,
-  `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu.
+  `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
-  (50 na stran), starejša sporočila se naložijo na zahtevo.
+  (50 na stran), starejša sporočila se naložijo na zahtevo. 
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).

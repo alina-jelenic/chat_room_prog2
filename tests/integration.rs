@@ -922,7 +922,7 @@ async fn message_history_is_paginated_ordered_and_html_escaped() {
     assert!(newest.contains("before_id=7"));
     assert!(newest.contains("&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;&amp;"));
     assert!(!newest.contains("<script>alert"));
-    assert!(newest.find("msg-007").unwrap() < newest.find("msg-055").unwrap());
+    assert!(newest.find("msg-055").unwrap() < newest.find("msg-007").unwrap());
 
     let response = app
         .clone()
@@ -939,7 +939,7 @@ async fn message_history_is_paginated_ordered_and_html_escaped() {
     assert!(older.contains("msg-006"));
     assert!(!older.contains("msg-007"));
     assert!(!older.contains("Naloži starejša sporočila"));
-    assert!(older.find("msg-001").unwrap() < older.find("msg-006").unwrap());
+    assert!(older.find("msg-006").unwrap() < older.find("msg-001").unwrap());
 }
 
 #[tokio::test]
