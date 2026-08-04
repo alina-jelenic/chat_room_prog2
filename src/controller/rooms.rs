@@ -454,6 +454,11 @@ pub async fn leave_room(
         ));
     }
 
+    // O morebitnem odhodu iz drugega zavihka obvestimo vse uporabnikove
+    // obstoječe WebSocket povezave v tej sobi. Tako se zaprejo tudi pasivne
+    // povezave, ki po odhodu ne pošljejo nobenega novega sporočila.
+    notify_room_access_revoked(&state, room.id, user.id)?;
+
     let general = ensure_room_exists(&db, "general", None).await?;
     let room_list = render_room_list(&db, user.id, &general.name).await?;
     let mut html = render_chat_panel(&general, &user);
@@ -894,6 +899,19 @@ fn notify_room_deleted(
         );
         let _ = sender.send(format!("{redirect_to_general}{room_list_oob}"));
     }
+
+    Ok(())
+}
+
+fn notify_room_access_revoked(
+    state: &SharedState,
+    room_id: i32,
+    user_id: i32,
+) -> Result<(), AppError> {
+    state
+        .lock()
+        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
+        .revoke_room_access(room_id, user_id);
 
     Ok(())
 }

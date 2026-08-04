@@ -140,13 +140,18 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         Ok(false) | Err(_) => return,
     }
 
-    let (tx, mut rx) = {
+    let (tx, mut rx, mut outgoing_revocations, mut incoming_revocations) = {
         let mut state = match state.lock() {
             Ok(state) => state,
             Err(_) => return,
         };
         let tx = state.get_or_create_room_tx(room.id);
-        (tx.clone(), tx.subscribe())
+        (
+            tx.clone(),
+            tx.subscribe(),
+            state.subscribe_to_room_access_revocations(),
+            state.subscribe_to_room_access_revocations(),
+        )
     };
 
     // Kanal za odgovore, namenjene samo trenutnemu uporabniku,
@@ -155,15 +160,39 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
 
     let (mut sender, mut receiver) = socket.split();
 
+    let outgoing_db = db.clone();
+    let outgoing_room = room.clone();
+    let outgoing_user_id = user.id;
+
     let send_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // `biased` zagotovi, da broadcast sporočilo (dejansko
-                // sporočilo v klepetu) vedno pošljemo pred morebitnim
-                // čakajočim osebnim sporočilom (reset forme), ki je bilo
-                // postavljeno v vrsto tik za njim.
+                // Obvestilo o odvzemu dostopa ima prednost pred novimi
+                // sporočili, da pasivna povezava po odhodu iz sobe ne more
+                // več prejemati vsebine drugih uporabnikov.
                 biased;
 
+                revoked = outgoing_revocations.recv() => {
+                    match revoked {
+                        Ok(event)
+                            if event.room_id == outgoing_room.id
+                                && event.user_id == outgoing_user_id => break,
+                        Ok(_) => continue,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            match rooms::user_can_access_room(
+                                &outgoing_db,
+                                &outgoing_room,
+                                outgoing_user_id,
+                            )
+                            .await
+                            {
+                                Ok(true) => continue,
+                                Ok(false) | Err(_) => break,
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
                 broadcasted = rx.recv() => {
                     match broadcasted {
                         Ok(message) => {
@@ -189,32 +218,50 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         }
     });
 
-    while let Some(result) = receiver.next().await {
-        match result {
-            Ok(Message::Text(text)) => {
-                if let Some(content) = websocket_content(&text) {
-                    // Članstvo se lahko spremeni tudi po vzpostavitvi povezave,
-                    // na primer če uporabnik sobo zapusti v drugem zavihku.
-                    // Pred vsakim sporočilom ga zato preverimo znova. Če dostopa
-                    // nima več, povezavo zapremo in sporočila ne shranimo.
-                    match rooms::user_can_access_room(&db, &room, user.id).await {
-                        Ok(true) => {}
-                        Ok(false) | Err(_) => break,
-                    }
+    loop {
+        tokio::select! {
+            biased;
 
-                    match rooms::create_websocket_message(&db, room.id, &user, &content).await {
-                        Ok(html) if !html.is_empty() => {
-                            let _ = tx.send(html);
-                            let _ = personal_tx.send(rooms::render_message_input_reset());
+            revoked = incoming_revocations.recv() => {
+                match revoked {
+                    Ok(event) if event.room_id == room.id && event.user_id == user.id => break,
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        match rooms::user_can_access_room(&db, &room, user.id).await {
+                            Ok(true) => continue,
+                            Ok(false) | Err(_) => break,
                         }
-                        Ok(_) => {}
-                        Err(e) => eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}"),
                     }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
-            Ok(Message::Close(_)) => break,
-            Ok(_) => {}
-            Err(_) => break,
+            result = receiver.next() => {
+                match result {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Some(content) = websocket_content(&text) {
+                            // Članstvo se lahko spremeni tudi po vzpostavitvi povezave.
+                            // Preverba pred shranjevanjem ostane dodatna zaščita pred
+                            // sporočilom, ki prispe istočasno z odhodom uporabnika.
+                            match rooms::user_can_access_room(&db, &room, user.id).await {
+                                Ok(true) => {}
+                                Ok(false) | Err(_) => break,
+                            }
+
+                            match rooms::create_websocket_message(&db, room.id, &user, &content).await {
+                                Ok(html) if !html.is_empty() => {
+                                    let _ = tx.send(html);
+                                    let _ = personal_tx.send(rooms::render_message_input_reset());
+                                }
+                                Ok(_) => {}
+                                Err(e) => eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}"),
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
         }
     }
 
