@@ -4,7 +4,9 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+};
 use serde::Deserialize;
 
 use crate::controller::auth::{create_jwt, session_cookie};
@@ -31,6 +33,7 @@ pub struct RegisterForm {
 
 pub const USERNAME_MIN_LENGTH: usize = 3;
 pub const USERNAME_MAX_LENGTH: usize = 24;
+pub const PASSWORD_MIN_LENGTH: usize = 6;
 
 /// Uporabniško ime poenotimo na male črke. Začne se s črko, nato pa
 /// dovolimo še številke, vezaj in podčrtaj. Tako se `Alina` in `alina`
@@ -117,9 +120,11 @@ pub async fn register_handler(
         ));
     }
 
-    if form.password.len() < 6 {
+    if form.password.len() < PASSWORD_MIN_LENGTH {
         return Ok(Html(
-            r#"<div id="register-msg" class="server-msg error">Geslo mora imeti vsaj 6 znakov.</div>"#.to_string(),
+            format!(
+                r#"<div id="register-msg" class="server-msg error">Geslo mora imeti vsaj {PASSWORD_MIN_LENGTH} znakov.</div>"#
+            ),
         ));
     }
 
@@ -190,4 +195,62 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+/// Administratorsko ponastavi samo račun iz stare baze, ki še nima veljavnega
+/// gesla. Funkcija ni HTTP endpoint: uporablja jo lokalni CLI, zato obiskovalec
+/// aplikacije ne more prevzeti tujega računa samo s poznavanjem uporabniškega
+/// imena.
+pub async fn admin_reset_legacy_password(
+    db: &DatabaseConnection,
+    legacy_username: &str,
+    new_username: Option<&str>,
+    new_password: &str,
+) -> Result<client::Model, String> {
+    if new_password.len() < PASSWORD_MIN_LENGTH {
+        return Err(format!(
+            "Geslo mora imeti vsaj {PASSWORD_MIN_LENGTH} znakov."
+        ));
+    }
+
+    let legacy_username = legacy_username.trim();
+    if legacy_username.is_empty() {
+        return Err("Vnesi uporabniško ime legacy računa.".to_string());
+    }
+
+    let user = Client::find()
+        .filter(client::Column::Username.eq(legacy_username))
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Račun '{legacy_username}' ne obstaja."))?;
+
+    if !user.geslo.is_empty() {
+        return Err(
+            "Ta račun že ima geslo; CLI je namenjen samo legacy računom.".to_string(),
+        );
+    }
+
+    // Staro ime obenem uskladimo z današnjimi pravili. Če je bilo staro ime
+    // neveljavno, lahko administrator kot drugi argument poda novo veljavno ime.
+    let normalized_username = normalize_username(new_username.unwrap_or(&user.username))?;
+    let name_owner = Client::find()
+        .filter(client::Column::Username.eq(&normalized_username))
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    if name_owner
+        .as_ref()
+        .is_some_and(|existing| existing.id != user.id)
+    {
+        return Err(format!(
+            "Uporabniško ime '{normalized_username}' je že zasedeno."
+        ));
+    }
+
+    let hashed = hash_password(new_password)?;
+    let mut active: client::ActiveModel = user.into();
+    active.username = Set(normalized_username);
+    active.geslo = Set(hashed);
+    active.update(db).await.map_err(|e| e.to_string())
 }

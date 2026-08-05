@@ -599,11 +599,7 @@ pub async fn create_websocket_message(
     if content.is_empty() {
         return Ok(String::new());
     }
-    if content.chars().count() > MAX_MESSAGE_LENGTH {
-        return Err(AppError(format!(
-            "Sporočilo ima lahko največ {MAX_MESSAGE_LENGTH} znakov."
-        )));
-    }
+    validate_message_content(content)?;
 
     let room_still_exists = Soba::find_by_id(room_id).one(db).await?.is_some();
     if !room_still_exists {
@@ -618,6 +614,15 @@ pub async fn create_websocket_message(
         Some(&user.username),
         msg.timestamp,
     ))
+}
+
+pub fn validate_message_content(content: &str) -> Result<(), AppError> {
+    if content.chars().count() > MAX_MESSAGE_LENGTH {
+        return Err(AppError(format!(
+            "Sporočilo ima lahko največ {MAX_MESSAGE_LENGTH} znakov."
+        )));
+    }
+    Ok(())
 }
 
 async fn render_room_list(
@@ -823,6 +828,7 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
     <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
+    <span class="connection-status connecting" data-connection-status role="status" aria-live="polite">Povezujem …</span>
     {room_control}
   </div>
 
@@ -834,10 +840,11 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
   </div>
 
   <div class="input-area">
+    <div id="message-status" class="message-status" role="status" aria-live="polite"></div>
     <form id="msg-form" ws-send>
       <div class="input-row">
         <textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required></textarea>
-        <button type="submit" class="send-btn" aria-label="Pošlji">
+        <button type="submit" class="send-btn" aria-label="Pošlji" disabled>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
           </svg>
@@ -987,8 +994,28 @@ fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp
 /// nedokončano besedilo drugim uporabnikom, ki ravno takrat tipkajo.
 pub fn render_message_input_reset() -> String {
     format!(
-        r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>"#,
+        r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>
+<div id="message-status" class="message-status" role="status" aria-live="polite" hx-swap-oob="true"></div>"#,
         max_message_length = MAX_MESSAGE_LENGTH,
+    )
+}
+
+pub fn render_rate_limit_warning() -> String {
+    render_message_status(
+        "warning",
+        "Sporočila pošiljaš prehitro. Počakaj trenutek in poskusi znova.",
+    )
+}
+
+pub fn render_message_error(message: &str) -> String {
+    render_message_status("error", message)
+}
+
+fn render_message_status(kind: &str, message: &str) -> String {
+    format!(
+        r#"<div id="message-status" class="message-status {}" role="alert" aria-live="assertive" hx-swap-oob="true">{}</div>"#,
+        html_escape(kind),
+        html_escape(message)
     )
 }
 
