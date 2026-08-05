@@ -188,11 +188,28 @@ pub async fn user_can_access_room(
     is_room_member(db, room.id, user_id).await
 }
 
+enum RoomCreationError {
+    NameTaken,
+    Other(AppError),
+}
+
+impl From<sea_orm::DbErr> for RoomCreationError {
+    fn from(e: sea_orm::DbErr) -> Self {
+        RoomCreationError::Other(AppError(e.to_string()))
+    }
+}
+
+impl From<AppError> for RoomCreationError {
+    fn from(e: AppError) -> Self {
+        RoomCreationError::Other(e)
+    }
+}
+
 async fn create_owned_room(
     db: &DatabaseConnection,
     name: String,
     owner_id: i32,
-) -> Result<soba::Model, AppError> {
+) -> Result<soba::Model, RoomCreationError> {
     use rand::Rng;
 
     for attempt in 0..MAX_ID_ATTEMPTS {
@@ -214,10 +231,20 @@ async fn create_owned_room(
             }
             Err(error) if is_unique_violation(&error) => {
                 transaction.rollback().await?;
+                //ločimo težavo med trk id ali imena
+                let name_taken = Soba::find()
+                    .filter(soba::Column::Name.eq(&name))
+                    .one(db)
+                    .await?
+                    .is_some();
+
+                if name_taken {
+                    return Err(RoomCreationError::NameTaken);
+                }
                 if attempt + 1 == MAX_ID_ATTEMPTS {
-                    return Err(AppError(
+                    return Err(RoomCreationError::Other(AppError(
                         "Sobe trenutno ni bilo mogoče ustvariti, poskusi znova.".to_string(),
-                    ));
+                    )));
                 }
             }
             Err(error) => {
@@ -293,7 +320,16 @@ pub async fn create_room(
         ));
     }
 
-    let room = create_owned_room(&db, clean_name, user.id).await?;
+    let room = match create_owned_room(&db, clean_name, user.id).await {
+        Ok(room) => room,
+        Err(RoomCreationError::NameTaken) => {
+            return Ok(room_action_response(
+                "error",
+                "Soba s tem imenom že obstaja. Pridruži se ji z njenim ID-jem.",
+            ));
+        }
+        Err(RoomCreationError::Other(e)) => return Err(e),
+    };
     let room_list = render_room_list(&db, user.id, &room.name).await?;
     let mut html =
         render_room_action_message("success", &format!("Soba #{} je ustvarjena.", room.name));
