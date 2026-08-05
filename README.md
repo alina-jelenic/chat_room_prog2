@@ -2,13 +2,13 @@
 
 ## Vsebina projekta
 
-V tem projektu bova ustvarila chat-room v realnem času. Z orodji, ki jih ponuja Rust, bova lahko hkrati vodila pogovore z več uporabniki z maksimalno (ne)stabilnostjo in (ne)varnostjo.
+V tem projektu sva ustvarila chat-room v realnem času. Z orodji, ki jih ponuja Rust, lahko tako hkrati vodiva pogovore z več uporabniki z maksimalno (ne)stabilnostjo in (ne)varnostjo.
 
 ## Zakaj sva se odločila za chat-room?
 
-Ta projekt sva izbrala iz več razlogov, saj sva po analizi več možnosti ugotovila, da je prilagojen delu v Rustu, tudi za nove uporabnike, in da bo na najboljši način prispeval k razvoju naših programskih veščin v tem jeziku. Bolj natančno, delo na tem projektu nam bo pomagalo napredovati natanko na tistih področjih, ki jih potrebujemo.
+Ta projekt sva izbrala iz več razlogov, saj sva po analizi več možnosti ugotovila, da je prilagojen delu v Rustu, tudi za nove uporabnike, in da bo in tudi je na najboljši način prispeval k razvoju naših programskih veščin v tem jeziku. Bolj natančno, delo na tem projektu nama je pomagalo napredovati natanko na tistih področjih, ki jih potrebujemo.
 
-Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi odjemalec–strežnik, kjer se več odjemalcev poveže na strežnik, ta pa skrbi za posredovanje sporočil med njimi.
+Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odjemalec–strežnik, kjer se več odjemalcev poveže na strežnik, ta pa skrbi za posredovanje sporočil med njimi.
 
 ## Struktura projekta
 
@@ -51,7 +51,7 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 
 ## Zagon projekta
 
-Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik. Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
+Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (Za ostale računalnike oz. uporabnike je po uspostavitvi strežnika potreben le dostop do interneta). Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
 
 1. Kopiraj .env.example v .env in po potrebi prilagodi vrednosti (predvsem JWT_SECRET, ki mora biti dolg vsaj 32 znakov).
 2. Zaženi aplikacijo:
@@ -135,14 +135,16 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 
 
 ## Testiranje
- 
-```sh
-cargo test --workspace --all-targets
-```
- 
+
 Integracijski testi (`tests/integration.rs`) pokrivajo avtentikacijo,
 upravljanje sob in članstva, straničenje sporočil ter WebSocket komunikacijo
 (vključno z zavračanjem nepooblaščenih povezav in obveščanjem uporabnikov
-ob izbrisu sobe).
+ob izbrisu sobe) in pokrivajo tudi robne primere. Zaženemo jih z ukazom:
+ 
+```sh
+cargo test --all
+```
+ 
+
 
 
