@@ -40,8 +40,81 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 │   └── integration.rs            # integracijski testi (HTTP + WebSocket)
 └── .github/workflows/ci.yml    # CI: fmt, clippy, testi
 ```
+## Uporabljeni paketi
+ 
+- **axum** — spletni strežnik in usmerjanje (vključno z WebSocket nadgradnjo)
+- **SeaORM** + **sea-orm-migration** — ORM in upravljanje migracij (SQLite)
+- **tokio** — asinhrono izvajanje
+- **jsonwebtoken** — seje prek JWT
+- **argon2** — varno zgoščevanje gesel
+- **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta
 
 ## Zagon projekta
+
+Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik. Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
+
+1. Kopiraj .env.example v .env in po potrebi prilagodi vrednosti (predvsem JWT_SECRET, ki mora biti dolg vsaj 32 znakov).
+2. Zaženi aplikacijo:
+```sh
+   cargo run
+```
+   Ob zagonu se samodejno izvedejo vse manjkajoče migracije in ustvari
+   soba `#general`, če še ne obstaja.
+
+3. Odloči se, kako bodo odjemalci dostopali do strežnika, in ustrezno
+   nastavi `SERVER_ADDR` v `.env`.
+
+    ### a) Samo na istem računalniku
+
+   Privzeta nastavitev že deluje brez sprememb (`SERVER_ADDR=127.0.0.1:3000`).
+   Aplikacijo odpreš v brskalniku na istem računalniku na naslovu: http://127.0.0.1:3000
+
+    ### b) Več naprav v istem omrežju (isti WiFi)
+
+   Strežnik mora poslušati na vseh omrežnih vmesnikih, ne samo na
+   `127.0.0.1`. V `.env` nastavi: `SERVER_ADDR=0.0.0.0:3000`.
+   Nato ugotovi lokalni IP naslov računalnika, na katerem teče strežnik:
+
+   - Windows: `ipconfig` (poišči "IPv4 Address")
+   - macOS / Linux: `ifconfig` ali `ip addr` (ali `hostname -I`)
+
+   Drugi uporabniki v istem omrežju nato v brskalniku odprejo: http://<IP-naslov-strežnika>:3000
+   Če se ne morejo povezati, preveri, ali požarni zid (firewall) na
+   računalniku s strežnikom blokira vrata 3000 (npr. na Windows: Windows
+   Defender Firewall → Dovoljene aplikacije; na Linuxu z `ufw`:
+   `sudo ufw allow 3000`).
+
+    ### c) Naprave v različnih omrežjih (dostop prek interneta)
+
+   To zahteva, da je strežnik dosegljiv od zunaj tvojega domačega omrežja.
+   Najenostavnejša pot je Cloudflare Quick Tunnel — brezplačna storitev, ki
+   ne zahteva registracije računa ne lastne domene.
+
+    1. Namesti orodje `cloudflared`:
+      - **Windows:** `winget install Cloudflare.cloudflared`
+      - **macOS:** `brew install cloudflare/cloudflare/cloudflared`
+      - **Linux (Debian/Ubuntu):**
+      ```sh
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+        sudo dpkg -i cloudflared.deb
+      ```
+
+      Za druge distribucije glej [uradno stran za prenos](https://developers.cloudflare.com/tunnel/downloads/).
+
+   2. Zaženi aplikacijo lokalno (`cargo run`, glej korak 2 zgoraj).
+   3. V ločenem terminalu zaženi:
+    ```sh
+      cloudflared tunnel --url http://localhost:3000
+    ```
+   4. V izpisu poišči vrstico z naslovom, ki se konča na
+      `.trycloudflare.com` (npr. `https://xxxx-xx-xx.trycloudflare.com`).
+      Ta naslov deluje takoj in ga lahko deliš s komerkoli, ne glede na to,
+      v katerem omrežju je — povezava ostane aktivna, dokler v terminalu
+      teče `cloudflared` (`Ctrl+C` jo prekine).
+
+   > **Opomba:** Quick Tunnel je namenjen priložnostnemu deljenju in
+   > testiranju, ne trajni uporabi — naslov se ob vsakem zagonu spremeni, deluje dokler je odprt terminal
+   > in ni namenjen produkcijski postavitvi.
 
 ## Glavne funkcionalnosti
  
@@ -59,4 +132,17 @@ Z uporabo asinhronega modela bova ustvarila sistem, ki temelji na arhitekturi od
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).
+
+
+## Testiranje
+ 
+```sh
+cargo test --workspace --all-targets
+```
+ 
+Integracijski testi (`tests/integration.rs`) pokrivajo avtentikacijo,
+upravljanje sob in članstva, straničenje sporočil ter WebSocket komunikacijo
+(vključno z zavračanjem nepooblaščenih povezav in obveščanjem uporabnikov
+ob izbrisu sobe).
+
 
