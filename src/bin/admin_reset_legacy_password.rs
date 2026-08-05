@@ -32,8 +32,8 @@ async fn run() -> Result<(), String> {
     }
 
     dotenvy::dotenv().ok();
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
+    let database_url =
+        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://./chat.db?mode=rwc".to_string());
     let db = Database::connect(&database_url)
         .await
         .map_err(|e| format!("Povezava z bazo ni uspela: {e}"))?;
@@ -49,13 +49,9 @@ async fn run() -> Result<(), String> {
         return Err("Gesli se ne ujemata.".to_string());
     }
 
-    let updated = admin_reset_legacy_password(
-        &db,
-        &legacy_username,
-        new_username.as_deref(),
-        &password,
-    )
-    .await?;
+    let updated =
+        admin_reset_legacy_password(&db, &legacy_username, new_username.as_deref(), &password)
+            .await?;
 
     println!(
         "Geslo legacy računa '{}' je uspešno nastavljeno.",
@@ -81,7 +77,5 @@ fn read_line(prompt: &str) -> Result<String, String> {
 }
 
 fn print_usage() {
-    println!(
-        "Uporaba: cargo run --bin admin_reset_legacy_password -- <staro_ime> [novo_ime]"
-    );
+    println!("Uporaba: cargo run --bin admin_reset_legacy_password -- <staro_ime> [novo_ime]");
 }

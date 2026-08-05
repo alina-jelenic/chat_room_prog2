@@ -236,14 +236,9 @@ async fn migrations_preserve_data_from_a_populated_legacy_database() {
             .await
             .is_err()
     );
-    let reset_user = admin_reset_legacy_password(
-        &db,
-        "Stari_Uporabnik",
-        None,
-        "nova_skrivnost",
-    )
-    .await
-    .unwrap();
+    let reset_user = admin_reset_legacy_password(&db, "Stari_Uporabnik", None, "nova_skrivnost")
+        .await
+        .unwrap();
     assert_eq!(reset_user.username, "stari_uporabnik");
     assert!(verify_password("nova_skrivnost", &reset_user.geslo).unwrap());
     assert!(
@@ -1359,14 +1354,12 @@ async fn websocket_rate_limit_is_shared_between_connections() {
         .unwrap();
 
     let (address, server) = start_server(app).await;
-    let (mut first_socket, _) =
-        connect_async(websocket_request(address, "general", &cookie))
-            .await
-            .unwrap();
-    let (mut second_socket, _) =
-        connect_async(websocket_request(address, "general", &cookie))
-            .await
-            .unwrap();
+    let (mut first_socket, _) = connect_async(websocket_request(address, "general", &cookie))
+        .await
+        .unwrap();
+    let (mut second_socket, _) = connect_async(websocket_request(address, "general", &cookie))
+        .await
+        .unwrap();
 
     first_socket
         .send(WsMessage::Text(r#"{"content":"prvo sporočilo"}"#.into()))
@@ -1381,7 +1374,9 @@ async fn websocket_rate_limit_is_shared_between_connections() {
 
     // Isti uporabnik poskusi omejitev obiti prek druge povezave.
     second_socket
-        .send(WsMessage::Text(r#"{"content":"prehitro sporočilo"}"#.into()))
+        .send(WsMessage::Text(
+            r#"{"content":"prehitro sporočilo"}"#.into(),
+        ))
         .await
         .unwrap();
     let warning = timeout(
@@ -1402,7 +1397,9 @@ async fn websocket_rate_limit_is_shared_between_connections() {
 
     sleep(MESSAGE_COOLDOWN + Duration::from_millis(50)).await;
     second_socket
-        .send(WsMessage::Text(r#"{"content":"sporočilo po premoru"}"#.into()))
+        .send(WsMessage::Text(
+            r#"{"content":"sporočilo po premoru"}"#.into(),
+        ))
         .await
         .unwrap();
     timeout(

@@ -4,9 +4,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::Deserialize;
 
 use crate::controller::auth::{create_jwt, session_cookie};
@@ -121,11 +119,9 @@ pub async fn register_handler(
     }
 
     if form.password.len() < PASSWORD_MIN_LENGTH {
-        return Ok(Html(
-            format!(
-                r#"<div id="register-msg" class="server-msg error">Geslo mora imeti vsaj {PASSWORD_MIN_LENGTH} znakov.</div>"#
-            ),
-        ));
+        return Ok(Html(format!(
+            r#"<div id="register-msg" class="server-msg error">Geslo mora imeti vsaj {PASSWORD_MIN_LENGTH} znakov.</div>"#
+        )));
     }
 
     let db = state
@@ -226,9 +222,7 @@ pub async fn admin_reset_legacy_password(
         .ok_or_else(|| format!("Račun '{legacy_username}' ne obstaja."))?;
 
     if !user.geslo.is_empty() {
-        return Err(
-            "Ta račun že ima geslo; CLI je namenjen samo legacy računom.".to_string(),
-        );
+        return Err("Ta račun že ima geslo; CLI je namenjen samo legacy računom.".to_string());
     }
 
     // Staro ime obenem uskladimo z današnjimi pravili. Če je bilo staro ime
