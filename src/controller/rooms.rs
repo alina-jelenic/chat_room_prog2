@@ -1,8 +1,8 @@
 use crate::controller::auth::{AuthUser, require_auth};
 use crate::controller::tipi::{RoomAccessRevokedReason, SharedState};
 use crate::controller::web::AppError;
-use crate::entities::prelude::{Client, Message, RoomMember, Soba};
-use crate::entities::{client, message, room_member, soba};
+use crate::entities::prelude::{Client, Message, MessageReactions, RoomMember, Soba};
+use crate::entities::{client, message, message_reactions, room_member, soba};
 use axum::{
     extract::{Form, Path, Query, State},
     http::StatusCode,
@@ -16,7 +16,7 @@ use sea_orm::{
     QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +29,8 @@ const MAX_MESSAGE_LENGTH: usize = 2000;
 const MESSAGES_PAGE_SIZE: u64 = 50;
 const SEARCH_RESULTS_PAGE_SIZE: u64 = 30;
 const MAX_SEARCH_LENGTH: usize = 100;
+
+const QUICK_REACTIONS: [&str; 5] = ["👍", "❤️", "😂", "😮", "😢"];
 
 #[derive(Debug, Deserialize)]
 pub struct MessagesQuery {
@@ -538,146 +540,6 @@ pub async fn list_messages(
     Ok(Html(render_messages_page(&db, &room, query.before_id).await?).into_response())
 }
 
-pub async fn search_messages(
-    jar: CookieJar,
-    State(state): State<SharedState>,
-    Path(room_name): Path<String>,
-    Query(query): Query<SearchMessagesQuery>,
-) -> Result<Response, AppError> {
-    let user = match authenticated_user(&jar, &state) {
-        Ok(user) => user,
-        Err(response) => return Ok(response),
-    };
-
-    let db = db_from_state(&state)?;
-    let room = match room_for_websocket(&db, &room_name).await? {
-        Some(room) => room,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    if !user_can_access_room(&db, &room, user.id).await? {
-        return Ok(StatusCode::FORBIDDEN.into_response());
-    }
-
-    let search_term = query.q.as_deref().unwrap_or_default().trim();
-    if search_term.is_empty() {
-        return Ok(Html(String::new()).into_response());
-    }
-    if search_term.chars().count() > MAX_SEARCH_LENGTH {
-        return Ok(Html(format!(
-            r#"<div class="search-message error">Iskalni niz ima lahko največ {MAX_SEARCH_LENGTH} znakov.</div>"#
-        ))
-        .into_response());
-    }
-
-    Ok(
-        Html(render_message_search_page(&db, &room, search_term, query.before_id).await?)
-            .into_response(),
-    )
-}
-
-pub async fn delete_message(
-    jar: CookieJar,
-    State(state): State<SharedState>,
-    Path(message_id): Path<i32>,
-) -> Result<Response, AppError> {
-    let user = match authenticated_user(&jar, &state) {
-        Ok(user) => user,
-        Err(response) => return Ok(response),
-    };
-
-    let db = db_from_state(&state)?;
-    let stored_message = match Message::find_by_id(message_id).one(&db).await? {
-        Some(message) => message,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    let room = match Soba::find_by_id(stored_message.soba_id).one(&db).await? {
-        Some(room) => room,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    if !user_can_access_room(&db, &room, user.id).await? {
-        return Ok(StatusCode::FORBIDDEN.into_response());
-    }
-    if stored_message.sender_id != Some(user.id as i64) {
-        return Ok((
-            StatusCode::FORBIDDEN,
-            "Izbrišeš lahko samo svoja sporočila.",
-        )
-            .into_response());
-    }
-
-    Message::delete_by_id(stored_message.id).exec(&db).await?;
-    let deletion = render_message_deletion_oob(stored_message.id);
-    broadcast_room_html(&state, room.id, deletion.clone())?;
-
-    Ok(Html(deletion).into_response())
-}
-
-pub async fn list_room_members(
-    jar: CookieJar,
-    State(state): State<SharedState>,
-    Path(room_name): Path<String>,
-) -> Result<Response, AppError> {
-    let user = match authenticated_user(&jar, &state) {
-        Ok(user) => user,
-        Err(response) => return Ok(response),
-    };
-
-    let db = db_from_state(&state)?;
-    let room = match room_for_websocket(&db, &room_name).await? {
-        Some(room) => room,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    if room.owner_id != Some(user.id) {
-        return Ok(StatusCode::FORBIDDEN.into_response());
-    }
-
-    Ok(Html(render_room_members(&db, &room).await?).into_response())
-}
-
-pub async fn kick_room_member(
-    jar: CookieJar,
-    State(state): State<SharedState>,
-    Path((room_name, user_id)): Path<(String, i32)>,
-) -> Result<Response, AppError> {
-    let user = match authenticated_user(&jar, &state) {
-        Ok(user) => user,
-        Err(response) => return Ok(response),
-    };
-
-    let db = db_from_state(&state)?;
-    let room = match room_for_websocket(&db, &room_name).await? {
-        Some(room) => room,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
-    };
-    if room.owner_id != Some(user.id) {
-        return Ok((
-            StatusCode::FORBIDDEN,
-            "Uporabnika lahko izžene samo lastnik sobe.",
-        )
-            .into_response());
-    }
-    if user_id == user.id {
-        return Ok((
-            StatusCode::BAD_REQUEST,
-            "Lastnik ne more izgnati samega sebe.",
-        )
-            .into_response());
-    }
-
-    let result = RoomMember::delete_many()
-        .filter(room_member::Column::SobaId.eq(room.id))
-        .filter(room_member::Column::ClientId.eq(user_id))
-        .exec(&db)
-        .await?;
-    if result.rows_affected == 0 {
-        return Ok(Html(render_room_members(&db, &room).await?).into_response());
-    }
-
-    notify_room_access_revoked(&state, room.id, user_id, RoomAccessRevokedReason::Kicked)?;
-
-    Ok(Html(render_room_members(&db, &room).await?).into_response())
-}
-
 pub async fn delete_room(
     jar: CookieJar,
     State(state): State<SharedState>,
@@ -853,6 +715,9 @@ async fn render_messages_page(
     }
 
     let mut last_date = String::new();
+    let message_ids: Vec<i32> = messages.iter().map(|msg| msg.id).collect();
+    let reactions_counts = reaction_counts_for_messages(db, &message_ids).await?;
+    let empty_counts = BTreeMap::new();
     for msg in &messages {
         let sender_name = msg
             .sender_id
@@ -870,7 +735,8 @@ async fn render_messages_page(
             last_date = date_str;
         }
 
-        blocks.push(render_message(msg, sender_name, msg.timestamp));
+        let counts = reactions_counts.get(&msg.id).unwrap_or(&empty_counts);
+        blocks.push(render_message(msg, sender_name, msg.timestamp, counts));
     }
 
     blocks.reverse();
@@ -899,146 +765,6 @@ fn render_load_older_button(room_name: &str, before_id: i32) -> String {
         </button>"##
     )
 }
-
-async fn render_message_search_page(
-    db: &DatabaseConnection,
-    room: &soba::Model,
-    search_term: &str,
-    before_id: Option<i32>,
-) -> Result<String, AppError> {
-    let mut query = Message::find()
-        .filter(message::Column::SobaId.eq(room.id))
-        .filter(message::Column::Content.contains(search_term));
-    if let Some(before_id) = before_id {
-        query = query.filter(message::Column::Id.lt(before_id));
-    }
-
-    let mut messages = query
-        .order_by_desc(message::Column::Id)
-        .limit(SEARCH_RESULTS_PAGE_SIZE + 1)
-        .all(db)
-        .await?;
-    let has_more = messages.len() as u64 > SEARCH_RESULTS_PAGE_SIZE;
-    if has_more {
-        messages.truncate(SEARCH_RESULTS_PAGE_SIZE as usize);
-    }
-
-    let sender_ids = messages
-        .iter()
-        .filter_map(|message| message.sender_id)
-        .collect::<Vec<_>>();
-    let clients = Client::find()
-        .filter(client::Column::Id.is_in(sender_ids))
-        .all(db)
-        .await?;
-    let sender_map = clients
-        .into_iter()
-        .map(|client| (client.id as i64, client.username))
-        .collect::<HashMap<_, _>>();
-
-    let mut html = String::new();
-    if before_id.is_none() {
-        html.push_str(&format!(
-            r#"<div class="search-summary">Rezultati za »{}«</div>"#,
-            html_escape(search_term)
-        ));
-    }
-    if messages.is_empty() && before_id.is_none() {
-        html.push_str(
-            r#"<div class="search-message">V tej sobi ni sporočil s tem besedilom.</div>"#,
-        );
-        return Ok(html);
-    }
-
-    for stored_message in &messages {
-        let sender_name = stored_message
-            .sender_id
-            .and_then(|id| sender_map.get(&id))
-            .map(String::as_str);
-        html.push_str(&render_message_variant(
-            stored_message,
-            sender_name,
-            stored_message.timestamp,
-            "search-message",
-        ));
-    }
-
-    if has_more && let Some(oldest) = messages.last() {
-        html.push_str(&render_search_load_more_button(
-            &room.name,
-            search_term,
-            oldest.id,
-        ));
-    }
-
-    Ok(html)
-}
-
-fn render_search_load_more_button(room_name: &str, search_term: &str, before_id: i32) -> String {
-    format!(
-        r##"<form class="search-load-more"
-              hx-get="/rooms/{room_name}/messages/search"
-              hx-target="this"
-              hx-swap="outerHTML">
-          <input type="hidden" name="q" value="{search_term}">
-          <input type="hidden" name="before_id" value="{before_id}">
-          <button type="submit" class="load-older-btn">Naloži več rezultatov</button>
-        </form>"##,
-        room_name = html_escape(room_name),
-        search_term = html_escape(search_term),
-    )
-}
-
-async fn render_room_members(
-    db: &DatabaseConnection,
-    room: &soba::Model,
-) -> Result<String, AppError> {
-    let memberships = RoomMember::find()
-        .filter(room_member::Column::SobaId.eq(room.id))
-        .all(db)
-        .await?;
-    let member_ids = memberships
-        .into_iter()
-        .map(|membership| membership.client_id)
-        .collect::<Vec<_>>();
-    let members = Client::find()
-        .filter(client::Column::Id.is_in(member_ids))
-        .order_by_asc(client::Column::Username)
-        .all(db)
-        .await?;
-
-    let mut html = r#"<div class="members-title">Člani sobe</div>"#.to_string();
-    if members.len() <= 1 {
-        html.push_str(r#"<div class="members-empty">V sobi še ni drugih članov.</div>"#);
-    }
-
-    for member in members {
-        let username = html_escape(&member.username);
-        if room.owner_id == Some(member.id) {
-            html.push_str(&format!(
-                r#"<div class="member-row"><span>{username}</span><span class="owner-label">lastnik</span></div>"#
-            ));
-        } else {
-            html.push_str(&format!(
-                r##"<div class="member-row">
-                  <span>{username}</span>
-                  <button type="button" class="kick-member-btn"
-                      hx-delete="/rooms/{room_name}/members/{user_id}"
-                      hx-target="#room-members"
-                      hx-swap="innerHTML"
-                      hx-confirm="Ali res želiš izgnati uporabnika {username} iz sobe #{room_name}?">
-                    Izženi
-                  </button>
-                </div>"##,
-                room_name = html_escape(&room.name),
-                user_id = member.id,
-            ));
-        }
-    }
-
-    Ok(html)
-}
-
 async fn insert_message(
     db: &DatabaseConnection,
     room_id: i32,
@@ -1268,15 +994,6 @@ fn notify_room_deleted(
     Ok(())
 }
 
-fn broadcast_room_html(state: &SharedState, room_id: i32, html: String) -> Result<(), AppError> {
-    let sender = state
-        .lock()
-        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
-        .get_or_create_room_tx(room_id);
-    let _ = sender.send(html);
-    Ok(())
-}
-
 fn notify_room_access_revoked(
     state: &SharedState,
     room_id: i32,
@@ -1291,26 +1008,11 @@ fn notify_room_access_revoked(
     Ok(())
 }
 
-pub fn render_kicked_redirect(room_name: &str) -> String {
-    let room_name = html_escape(room_name);
-    format!(
-        r##"<div class="main" id="chat-panel" hx-swap-oob="outerHTML"
-             hx-get="/rooms/general/panel" hx-trigger="load" hx-swap="outerHTML">
-          <div class="sys-msg">Lastnik te je izgnal iz sobe #{room_name}. Odpiram #general …</div>
-        </div>{}"##,
-        render_room_list_reload_oob()
-    )
-}
-
-fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
-    render_message_variant(msg, sender_name, timestamp, "message")
-}
-
-fn render_message_variant(
+fn render_message(
     msg: &message::Model,
     sender_name: Option<&str>,
     timestamp: i64,
-    id_prefix: &str,
+    reactions: &BTreeMap<String, u32>,
 ) -> String {
     let sender = sender_name
         .map(str::trim)
@@ -1323,49 +1025,27 @@ fn render_message_variant(
         .map(|dt| dt.format("%H:%M").to_string())
         .unwrap_or_else(|| "??:??".to_string());
 
-    let (sender_class, sender_id, delete_button) = match msg.sender_id {
-        Some(sender_id) => (
-            format!("sender-{sender_id}"),
-            sender_id.to_string(),
-            format!(
-                r##"<button type="button" class="message-delete-btn"
-                    aria-label="Izbriši sporočilo"
-                    hx-delete="/messages/{message_id}"
-                    hx-swap="none"
-                    hx-confirm="Ali res želiš izbrisati to sporočilo?">Izbriši</button>"##,
-                message_id = msg.id,
-            ),
-        ),
-        None => ("sender-unknown".to_string(), String::new(), String::new()),
-    };
-
     format!(
-        r#"<div class="msg {sender_class}" id="{id_prefix}-{message_id}" data-sender-id="{sender_id}">
-  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span>{delete_button}</div>
+        r#"<div class="msg" id="msg-{id}">
+  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span></div>
   <div class="msg-text">{content}</div>
+  <div class="reactions" id="reactions-{id}">{oznaka}</div>
+  <div class="reaction-controls">{quick}{add_form}</div>
 </div>"#,
-        sender_class = sender_class,
-        id_prefix = html_escape(id_prefix),
-        message_id = msg.id,
-        sender_id = sender_id,
+        id = msg.id,
         sender = html_escape(sender),
         time = time_str,
-        delete_button = delete_button,
         content = html_escape(&msg.content),
+        oznaka = render_reaction_oznaka(msg.id, reactions),
+        quick = render_quick_reaction_buttons(msg.id),
+        add_form = render_reaction_add_form(msg.id),
     )
 }
 
 fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
     format!(
         r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
-        render_message(msg, sender_name, timestamp)
-    )
-}
-
-fn render_message_deletion_oob(message_id: i32) -> String {
-    format!(
-        r#"<div id="message-{message_id}" hx-swap-oob="delete"></div>
-<div id="search-message-{message_id}" hx-swap-oob="delete"></div>"#
+        render_message(msg, sender_name, timestamp, &BTreeMap::new())
     )
 }
 
@@ -1432,4 +1112,139 @@ fn html_escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+pub async fn toggle_reaction(
+    db: &DatabaseConnection,
+    room_id: i32,
+    user_id: i32,
+    message_id: i32,
+    emoji: &str,
+) -> Result<Option<String>, AppError> {
+    let emoji = emoji.trim();
+    if emoji.is_empty() || emoji.chars().count() > 8 {
+        return Ok(None);
+    }
+    let message_exists = Message::find_by_id(message_id)
+        .filter(message::Column::SobaId.eq(room_id))
+        .one(db)
+        .await?
+        .is_some();
+    if !message_exists {
+        return Ok(None);
+    }
+
+    let existing = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.eq(message_id))
+        .filter(message_reactions::Column::ClientId.eq(user_id))
+        .filter(message_reactions::Column::Emoji.eq(emoji))
+        .one(db)
+        .await?;
+
+    match existing {
+        Some(reaction) => {
+            MessageReactions::delete_by_id(reaction.id).exec(db).await?;
+        }
+        None => {
+            message_reactions::ActiveModel {
+                message_id: Set(message_id),
+                client_id: Set(user_id),
+                emoji: Set(emoji.to_string()),
+                ..Default::default()
+            }
+            .insert(db)
+            .await?;
+        }
+    }
+
+    let counts = reaction_counts_for_message(db, message_id).await?;
+    Ok(Some(render_reactions_oznaka_oob(message_id, &counts)))
+}
+
+async fn reaction_counts_for_message(
+    db: &DatabaseConnection,
+    message_id: i32,
+) -> Result<BTreeMap<String, u32>, AppError> {
+    let reactions = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.eq(message_id))
+        .all(db)
+        .await?;
+
+    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    for r in &reactions {
+        *counts.entry(r.emoji.clone()).or_insert(0) += 1;
+    }
+    Ok(counts)
+}
+//poizve za vse reakcije na enkar pri nalaganju starejših sporočil
+async fn reaction_counts_for_messages(
+    db: &DatabaseConnection,
+    message_ids: &[i32],
+) -> Result<HashMap<i32, BTreeMap<String, u32>>, AppError> {
+    let reactions = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.is_in(message_ids.to_vec()))
+        .all(db)
+        .await?;
+
+    let mut map: HashMap<i32, BTreeMap<String, u32>> = HashMap::new();
+    for r in &reactions {
+        *map.entry(r.message_id)
+            .or_default()
+            .entry(r.emoji.clone())
+            .or_insert(0) += 1;
+    }
+    Ok(map)
+}
+
+//da se izpiše število in kateri emoji pod sporočilom
+fn render_reactions_oznaka_oob(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
+    format!(
+        r#"<div class="reactions" id="reactions-{id}" hx-swap-oob="innerHTML">{oznaka}</div>"#,
+        id = message_id,
+        oznaka = render_reaction_oznaka(message_id, counts),
+    )
+}
+
+fn render_reaction_oznaka(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
+    let mut oznaka = String::new();
+    for (emoji, count) in counts {
+        oznaka.push_str(&format!(
+            r#"<form class="reaction-pill-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="hidden" name="reaction_emoji" value="{emoji}">
+    <button type="submit" class="reaction-pill">{emoji} {count}</button>
+  </form>"#,
+            id = message_id,
+            emoji = html_escape(emoji),
+            count = count,
+        ));
+    }
+    oznaka
+}
+
+fn render_quick_reaction_buttons(message_id: i32) -> String {
+    let mut html = String::new();
+    for emoji in QUICK_REACTIONS {
+        html.push_str(&format!(
+            r#"<form class="reaction-quick-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="hidden" name="reaction_emoji" value="{emoji}">
+    <button type="submit" class="reaction-quick-btn">{emoji}</button>
+  </form>"#,
+            id = message_id,
+            emoji = emoji,
+        ));
+    }
+    html
+}
+
+fn render_reaction_add_form(message_id: i32) -> String {
+    format!(
+        r#"<form class="reaction-add-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="text" name="reaction_emoji" maxlength="8"
+      placeholder="+ drugo" class="reaction-add-input">
+  </form>"#,
+        id = message_id,
+    )
 }

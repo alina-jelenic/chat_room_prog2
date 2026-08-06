@@ -529,6 +529,98 @@
       color: var(--text);
     }
 
+        .reactions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .reactions-oznaka-form {
+      display: contents;
+    }
+
+    .reactions-quick-form {
+      display: contents;
+    }
+
+    .reaction-oznaka {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--bg);
+      font-size: .74rem;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--text);
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+
+    .reaction-oznaka:hover {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+    }
+
+    /* oznaka */
+    .reaction-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: .45;
+  transition: opacity .15s;
+}
+ 
+.msg:hover .reaction-controls {
+  opacity: 1;
+}
+ 
+.reaction-quick-btn {
+  border: none;
+  background: transparent;
+  font-size: .85rem;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background .15s, transform .1s;
+}
+ 
+.reaction-quick-btn:hover {
+  background: var(--bg);
+  transform: scale(1.15);
+}
+ 
+.reaction-add-form {
+  display: inline-flex;
+}
+ 
+.reaction-add-input {
+  width: 72px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: .72rem;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--muted);
+  outline: none;
+  transition: border-color .15s, background .15s;
+}
+ 
+.reaction-add-input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+ 
+.reaction-add-input::placeholder {
+  color: var(--muted);
+}
+
     /* system messages */
     .sys-msg {
       text-align: center;
