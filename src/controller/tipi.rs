@@ -1,9 +1,14 @@
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 pub type SharedState = Arc<Mutex<ServerState>>;
+
+/// En uporabnik lahko pošlje največ eno sporočilo v tem časovnem razmiku.
+/// Omejitev je skupna vsem njegovim zavihkom, povezavam in sobam.
+pub const MESSAGE_COOLDOWN: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoomAccessRevoked {
@@ -16,6 +21,7 @@ pub struct ServerState {
     pub db: DatabaseConnection,
     pub jwt_secret: String,
     room_access_revoked_tx: broadcast::Sender<RoomAccessRevoked>,
+    last_message_at: HashMap<i32, Instant>,
 }
 
 impl ServerState {
@@ -39,6 +45,23 @@ impl ServerState {
             .send(RoomAccessRevoked { room_id, user_id });
     }
 
+    /// Rezervira naslednje pošiljanje. `false` pomeni, da uporabnikov prejšnji
+    /// zapis še ni dovolj star. Ker se preverba izvede pod skupnim kratkim
+    /// mutexom, omejitve ni mogoče obiti z drugim zavihkom ali drugo sobo.
+    pub fn reserve_message_send(&mut self, user_id: i32) -> bool {
+        let now = Instant::now();
+        if self
+            .last_message_at
+            .get(&user_id)
+            .is_some_and(|last| now.saturating_duration_since(*last) < MESSAGE_COOLDOWN)
+        {
+            return false;
+        }
+
+        self.last_message_at.insert(user_id, now);
+        true
+    }
+
     pub fn new(db: DatabaseConnection, jwt_secret: String) -> SharedState {
         let (room_access_revoked_tx, _) = broadcast::channel(64);
 
@@ -47,6 +70,7 @@ impl ServerState {
             db,
             jwt_secret,
             room_access_revoked_tx,
+            last_message_at: HashMap::new(),
         }))
     }
 }

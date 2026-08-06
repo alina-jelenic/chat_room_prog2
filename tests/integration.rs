@@ -9,9 +9,9 @@ use axum::{
 use chat_room_prog2::{
     controller::{
         auth::{Claims, SESSION_COOKIE, create_jwt, validate_jwt_secret, verify_jwt},
-        forms::{normalize_username, verify_password},
+        forms::{admin_reset_legacy_password, normalize_username, verify_password},
         rooms::{ensure_default_room, prepare_database_schema},
-        tipi::ServerState,
+        tipi::{MESSAGE_COOLDOWN, ServerState},
         web::build_router,
     },
     entities::{
@@ -28,7 +28,7 @@ use sea_orm::{
     EntityTrait, PaginatorTrait, QueryFilter, Set,
 };
 use std::net::SocketAddr;
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, sleep, timeout};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{Error as WsError, Message as WsMessage, client::IntoClientRequest},
@@ -169,6 +169,21 @@ fn expired_jwt_is_rejected() {
     assert!(verify_jwt(&token, TEST_SECRET).is_none());
 }
 
+#[test]
+fn frontend_reports_websocket_connection_state() {
+    let html = include_str!("../static/index.html");
+    for event_name in [
+        "htmx:wsConnecting",
+        "htmx:wsOpen",
+        "htmx:wsClose",
+        "htmx:wsError",
+    ] {
+        assert!(html.contains(event_name));
+    }
+    assert!(html.contains("data-connection-status"));
+    assert!(html.contains("Ponovno povezujem"));
+}
+
 #[tokio::test]
 async fn migrations_and_default_room_are_idempotent() {
     let (_app, db) = test_app().await;
@@ -196,7 +211,7 @@ async fn migrations_preserve_data_from_a_populated_legacy_database() {
     // Prve tri migracije predstavljajo staro različico baze: uporabnik še nima
     // gesla, sporočilo pa še ni povezano s sobo.
     Migrator::up(&db, Some(3)).await.unwrap();
-    db.execute_unprepared("INSERT INTO client (id, username) VALUES (1, 'stari_uporabnik')")
+    db.execute_unprepared("INSERT INTO client (id, username) VALUES (1, 'Stari_Uporabnik')")
         .await
         .unwrap();
     db.execute_unprepared("INSERT INTO soba (id, name) VALUES (123456, 'stara_soba')")
@@ -212,9 +227,25 @@ async fn migrations_preserve_data_from_a_populated_legacy_database() {
     prepare_database_schema(&db).await.unwrap();
 
     let legacy_user = Client::find_by_id(1).one(&db).await.unwrap().unwrap();
-    assert_eq!(legacy_user.username, "stari_uporabnik");
+    assert_eq!(legacy_user.username, "Stari_Uporabnik");
     assert_eq!(legacy_user.geslo, "");
     assert!(!verify_password("karkoli", &legacy_user.geslo).unwrap());
+
+    assert!(
+        admin_reset_legacy_password(&db, "Stari_Uporabnik", None, "12345")
+            .await
+            .is_err()
+    );
+    let reset_user = admin_reset_legacy_password(&db, "Stari_Uporabnik", None, "nova_skrivnost")
+        .await
+        .unwrap();
+    assert_eq!(reset_user.username, "stari_uporabnik");
+    assert!(verify_password("nova_skrivnost", &reset_user.geslo).unwrap());
+    assert!(
+        admin_reset_legacy_password(&db, "stari_uporabnik", None, "druga_skrivnost")
+            .await
+            .is_err()
+    );
 
     let general = Soba::find()
         .filter(soba::Column::Name.eq("general"))
@@ -439,6 +470,8 @@ async fn registration_login_room_panel_and_deletion_work_together() {
     let panel = body_text(response).await;
     assert!(panel.contains("data-current-username=\"alina\""));
     assert!(panel.contains("ws-connect=\"/ws?room_name=rust\""));
+    assert!(panel.contains("data-connection-status"));
+    assert!(panel.contains("class=\"send-btn\" aria-label=\"Pošlji\" disabled"));
     assert!(!panel.contains("username=gost"));
     assert!(panel.contains("hx-delete=\"/rooms/rust\""));
     assert!(!panel.contains("hx-delete=\"/rooms/rust/membership\""));
@@ -1200,6 +1233,7 @@ async fn passive_websocket_closes_after_member_leaves_while_owner_keeps_chatting
     // pasivno povezavo vseeno sam zapreti.
     wait_for_socket_close(&mut member_socket).await;
 
+    sleep(MESSAGE_COOLDOWN + Duration::from_millis(50)).await;
     owner_socket
         .send(WsMessage::Text(
             r#"{"content":"sporočilo po pasivnem odhodu"}"#.into(),
@@ -1263,6 +1297,15 @@ async fn websocket_message_is_authenticated_persisted_and_broadcast() {
         ))
         .await
         .unwrap();
+    let length_error = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut socket, "največ 2000 znakov"),
+    )
+    .await
+    .expect("uporabnik ni prejel opozorila o predolgem sporočilu");
+    assert!(length_error.contains("message-status"));
+    assert_eq!(message::Entity::find().count(&db).await.unwrap(), 0);
+
     socket
         .send(WsMessage::Text(
             r#"{"content":"pozdrav iz websocket testa"}"#.into(),
@@ -1296,6 +1339,86 @@ async fn websocket_message_is_authenticated_persisted_and_broadcast() {
     assert_eq!(message::Entity::find().count(&db).await.unwrap(), 1);
 
     socket.close(None).await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_rate_limit_is_shared_between_connections() {
+    let (app, db) = test_app().await;
+    let cookie = register_and_login(&app, "alina").await;
+    let general = Soba::find()
+        .filter(soba::Column::Name.eq("general"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (address, server) = start_server(app).await;
+    let (mut first_socket, _) = connect_async(websocket_request(address, "general", &cookie))
+        .await
+        .unwrap();
+    let (mut second_socket, _) = connect_async(websocket_request(address, "general", &cookie))
+        .await
+        .unwrap();
+
+    first_socket
+        .send(WsMessage::Text(r#"{"content":"prvo sporočilo"}"#.into()))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut first_socket, "prvo sporočilo"),
+    )
+    .await
+    .expect("prvo sporočilo ni bilo sprejeto");
+
+    // Isti uporabnik poskusi omejitev obiti prek druge povezave.
+    second_socket
+        .send(WsMessage::Text(
+            r#"{"content":"prehitro sporočilo"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    let warning = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut second_socket, "pošiljaš prehitro"),
+    )
+    .await
+    .expect("uporabnik ni prejel opozorila o omejitvi");
+    assert!(warning.contains("message-status"));
+    assert_eq!(
+        message::Entity::find()
+            .filter(message::Column::SobaId.eq(general.id))
+            .count(&db)
+            .await
+            .unwrap(),
+        1
+    );
+
+    sleep(MESSAGE_COOLDOWN + Duration::from_millis(50)).await;
+    second_socket
+        .send(WsMessage::Text(
+            r#"{"content":"sporočilo po premoru"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    timeout(
+        Duration::from_secs(2),
+        recv_until(&mut second_socket, "sporočilo po premoru"),
+    )
+    .await
+    .expect("sporočilo po cooldownu ni bilo sprejeto");
+    assert_eq!(
+        message::Entity::find()
+            .filter(message::Column::SobaId.eq(general.id))
+            .count(&db)
+            .await
+            .unwrap(),
+        2
+    );
+
+    first_socket.close(None).await.unwrap();
+    second_socket.close(None).await.unwrap();
     server.abort();
 }
 
@@ -1416,6 +1539,7 @@ async fn websocket_broadcast_reaches_two_joined_users() {
         .await
         .unwrap();
 
+    sleep(MESSAGE_COOLDOWN + Duration::from_millis(50)).await;
     member_socket
         .send(WsMessage::Text(r#"{"content":"sporočilo za oba"}"#.into()))
         .await

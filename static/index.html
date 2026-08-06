@@ -265,6 +265,23 @@
       font-size: .7rem;
     }
 
+    .connection-status {
+      border-radius: 7px;
+      padding: 5px 8px;
+      background: var(--info-bg);
+      color: var(--info);
+      border: 1px solid var(--info-border);
+      font-size: .7rem;
+      white-space: nowrap;
+    }
+    .connection-status.connected { display: none; }
+    .connection-status.disconnected,
+    .connection-status.error {
+      background: var(--error-bg);
+      color: var(--error);
+      border-color: var(--error-border);
+    }
+
     .delete-room-btn {
       border: 1px solid #e3b8b8;
       border-radius: 7px;
@@ -515,6 +532,25 @@
       border-top: 1px solid var(--border);
     }
 
+    .message-status {
+      margin-bottom: 9px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: .76rem;
+      line-height: 1.35;
+    }
+    .message-status:empty { display: none; }
+    .message-status.warning {
+      background: var(--info-bg);
+      color: var(--info);
+      border: 1px solid var(--info-border);
+    }
+    .message-status.error {
+      background: var(--error-bg);
+      color: var(--error);
+      border: 1px solid var(--error-border);
+    }
+
     .input-row {
       display: flex;
       align-items: flex-end;
@@ -560,6 +596,11 @@
     }
     .send-btn:hover  { background: var(--accent-h); }
     .send-btn:active { transform: scale(.93); }
+    .send-btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+      transform: none;
+    }
     .send-btn svg { display: block; }
   </style>
 </head>
@@ -640,7 +681,56 @@
   <div class="sys-msg">Nalaganje sobe #general…</div>
 </div>
 
-<script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
-<script src="https://unpkg.com/htmx-ext-ws@2.0.2/ws.js"></script>
+<script src="https://unpkg.com/htmx.org@2.0.10/dist/htmx.min.js"></script>
+<script src="https://unpkg.com/htmx-ext-ws@2.0.4/ws.js"></script>
+<script>
+  (() => {
+    function panelFromEvent(event) {
+      const socketElement = event.detail && event.detail.elt
+        ? event.detail.elt
+        : event.target;
+      const panel = socketElement && socketElement.closest
+        ? socketElement.closest('#chat-panel')
+        : null;
+      return panel && document.documentElement.contains(panel) ? panel : null;
+    }
+
+    function setConnectionState(event, state, message) {
+      const panel = panelFromEvent(event);
+      if (!panel) return;
+
+      const status = panel.querySelector('[data-connection-status]');
+      const sendButton = panel.querySelector('.send-btn');
+      if (status) {
+        status.className = `connection-status ${state}`;
+        status.textContent = message;
+      }
+      if (sendButton) sendButton.disabled = state !== 'connected';
+    }
+
+    document.body.addEventListener('htmx:wsConnecting', event => {
+      setConnectionState(event, 'connecting', 'Povezujem …');
+    });
+    document.body.addEventListener('htmx:wsOpen', event => {
+      setConnectionState(event, 'connected', 'Povezano');
+    });
+    document.body.addEventListener('htmx:wsError', event => {
+      setConnectionState(event, 'error', 'Napaka povezave.');
+    });
+    document.body.addEventListener('htmx:wsClose', event => {
+      const code = event.detail && event.detail.event
+        ? event.detail.event.code
+        : 1006;
+      const reconnects = [1006, 1012, 1013].includes(code);
+      setConnectionState(
+        event,
+        'disconnected',
+        reconnects
+          ? 'Povezava je prekinjena. Ponovno povezujem …'
+          : 'Povezava je bila zaprta.'
+      );
+    });
+  })();
+</script>
 </body>
 </html>
