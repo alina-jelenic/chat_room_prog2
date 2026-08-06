@@ -1,4 +1,4 @@
-use crate::integration::{body_text, form_request, register_and_login, test_app};
+use crate::common::{body_text, form_request, register_and_login, test_app};
 
 use axum::http::StatusCode;
 use chat_room_prog2::{

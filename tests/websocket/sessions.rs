@@ -1,4 +1,4 @@
-use crate::integration::{start_server, test_app, websocket_request};
+use crate::common::{start_server, test_app, websocket_request};
 use axum::http::StatusCode;
 
 use tokio_tungstenite::{connect_async, tungstenite::Error as WsError};

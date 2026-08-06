@@ -1,38 +1,46 @@
+//! Osnovna logika sob: ustvarjanje, članstvo, dostop in brisanje sob.
+//! Sporočila, prikaz HTML in reakcije so razdeljeni v podmodule.
+
 use crate::controller::auth::{AuthUser, require_auth};
 use crate::controller::tipi::{RoomAccessRevokedReason, SharedState};
 use crate::controller::web::AppError;
-use crate::entities::prelude::{Client, Message, MessageReactions, RoomMember, Soba};
-use crate::entities::{client, message, message_reactions, room_member, soba};
+use crate::entities::prelude::{Message, RoomMember, Soba};
+use crate::entities::{message, room_member, soba};
 use axum::{
-    extract::{Form, Path, Query, State},
+    extract::{Form, Path, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::cookie::CookieJar;
-use chrono::{Local, TimeZone};
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, TransactionTrait,
+    Set, TransactionTrait,
 };
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+mod messages;
+mod reactions;
+mod views;
+
+pub use messages::{
+    create_websocket_message, delete_message, list_messages, render_message_error,
+    render_message_input_reset, render_rate_limit_warning, search_messages,
+    validate_message_content,
+};
+pub use reactions::toggle_reaction;
+pub use views::render_kicked_redirect;
+
+use views::{
+    notify_room_access_revoked, notify_room_deleted, render_chat_panel, render_chat_panel_oob,
+    render_room_action_message, render_room_action_message_oob, render_room_list,
+    render_room_list_oob, render_room_members, room_action_response, room_action_retarget_response,
+    room_error_panel,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomForm {
     pub name: Option<String>,
-}
-
-const MAX_MESSAGE_LENGTH: usize = 2000;
-
-const MESSAGES_PAGE_SIZE: u64 = 50;
-
-const QUICK_REACTIONS: [&str; 5] = ["👍", "❤️", "😂", "😮", "😢"];
-
-#[derive(Debug, Deserialize)]
-pub struct MessagesQuery {
-    pub before_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -509,11 +517,10 @@ pub async fn leave_room(
     Ok(Html(html).into_response())
 }
 
-pub async fn list_messages(
+pub async fn list_room_members(
     jar: CookieJar,
     State(state): State<SharedState>,
     Path(room_name): Path<String>,
-    Query(query): Query<MessagesQuery>,
 ) -> Result<Response, AppError> {
     let user = match authenticated_user(&jar, &state) {
         Ok(user) => user,
@@ -525,11 +532,55 @@ pub async fn list_messages(
         Some(room) => room,
         None => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
-    if !user_can_access_room(&db, &room, user.id).await? {
+    if room.owner_id != Some(user.id) {
         return Ok(StatusCode::FORBIDDEN.into_response());
     }
 
-    Ok(Html(render_messages_page(&db, &room, query.before_id).await?).into_response())
+    Ok(Html(render_room_members(&db, &room).await?).into_response())
+}
+
+pub async fn kick_room_member(
+    jar: CookieJar,
+    State(state): State<SharedState>,
+    Path((room_name, user_id)): Path<(String, i32)>,
+) -> Result<Response, AppError> {
+    let user = match authenticated_user(&jar, &state) {
+        Ok(user) => user,
+        Err(response) => return Ok(response),
+    };
+
+    let db = db_from_state(&state)?;
+    let room = match room_for_websocket(&db, &room_name).await? {
+        Some(room) => room,
+        None => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
+    if room.owner_id != Some(user.id) {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            "Uporabnika lahko izžene samo lastnik sobe.",
+        )
+            .into_response());
+    }
+    if user_id == user.id {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            "Lastnik ne more izgnati samega sebe.",
+        )
+            .into_response());
+    }
+
+    let result = RoomMember::delete_many()
+        .filter(room_member::Column::SobaId.eq(room.id))
+        .filter(room_member::Column::ClientId.eq(user_id))
+        .exec(&db)
+        .await?;
+    if result.rows_affected == 0 {
+        return Ok(Html(render_room_members(&db, &room).await?).into_response());
+    }
+
+    notify_room_access_revoked(&state, room.id, user_id, RoomAccessRevokedReason::Kicked)?;
+
+    Ok(Html(render_room_members(&db, &room).await?).into_response())
 }
 
 pub async fn delete_room(
@@ -589,623 +640,4 @@ pub async fn delete_room(
     let mut html = render_chat_panel(&general, &user);
     html.push_str(&render_room_list_oob(&room_list));
     Ok(Html(html).into_response())
-}
-
-pub async fn create_websocket_message(
-    db: &DatabaseConnection,
-    room_id: i32,
-    user: &AuthUser,
-    content: &str,
-) -> Result<String, AppError> {
-    let content = content.trim();
-    if content.is_empty() {
-        return Ok(String::new());
-    }
-    validate_message_content(content)?;
-
-    let room_still_exists = Soba::find_by_id(room_id).one(db).await?.is_some();
-    if !room_still_exists {
-        // Soba je bila med tem, ko je uporabnik tipkal, že izbrisana.
-        // Sporočila ne shranimo — vrnemo prazen niz, enako kot pri praznem sporočilu.
-        return Ok(String::new());
-    }
-
-    let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
-    Ok(render_message_oob(
-        &msg,
-        Some(&user.username),
-        msg.timestamp,
-    ))
-}
-
-pub fn validate_message_content(content: &str) -> Result<(), AppError> {
-    if content.chars().count() > MAX_MESSAGE_LENGTH {
-        return Err(AppError(format!(
-            "Sporočilo ima lahko največ {MAX_MESSAGE_LENGTH} znakov."
-        )));
-    }
-    Ok(())
-}
-
-async fn render_room_list(
-    db: &DatabaseConnection,
-    user_id: i32,
-    active_room_name: &str,
-) -> Result<String, AppError> {
-    let mut room_ids = RoomMember::find()
-        .filter(room_member::Column::ClientId.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|membership| membership.soba_id)
-        .collect::<Vec<_>>();
-
-    if let Some(general) = room_for_websocket(db, "general").await? {
-        room_ids.push(general.id);
-    }
-    room_ids.sort_unstable();
-    room_ids.dedup();
-
-    let rooms = Soba::find()
-        .filter(soba::Column::Id.is_in(room_ids))
-        .order_by_asc(soba::Column::Name)
-        .all(db)
-        .await?;
-
-    let mut html = String::new();
-    for room in rooms {
-        html.push_str(&render_room_button(&room, room.name == active_room_name));
-    }
-
-    Ok(html)
-}
-
-async fn render_messages_page(
-    db: &DatabaseConnection,
-    room: &soba::Model,
-    before_id: Option<i32>,
-) -> Result<String, AppError> {
-    let mut query = Message::find().filter(message::Column::SobaId.eq(room.id));
-
-    if let Some(before_id) = before_id {
-        query = query.filter(message::Column::Id.lt(before_id));
-    }
-
-    // Vzamemo eno sporočilo več, da ugotovimo, ali obstajajo še starejša.
-    let mut messages = query
-        .order_by_desc(message::Column::Id)
-        .limit(MESSAGES_PAGE_SIZE + 1)
-        .all(db)
-        .await?;
-
-    let has_more = messages.len() as u64 > MESSAGES_PAGE_SIZE;
-    if has_more {
-        messages.truncate(MESSAGES_PAGE_SIZE as usize);
-    }
-    messages.reverse(); // nazaj v kronološki vrstni red za izpis
-
-    let sender_ids: Vec<i64> = messages.iter().filter_map(|msg| msg.sender_id).collect();
-    let clients = Client::find()
-        .filter(client::Column::Id.is_in(sender_ids))
-        .all(db)
-        .await?;
-    let sender_map: HashMap<i64, String> = clients
-        .into_iter()
-        .map(|client| (client.id as i64, client.username))
-        .collect();
-
-    // Bloke (ločila + sporočila) gradimo v kronološkem vrstnem redu,
-    // nato jih obrnemo, ker mora biti v DOM-u najnovejše sporočilo prvo
-    // (zaradi flex-direction: column-reverse v CSS-ju).
-    let mut blocks: Vec<String> = Vec::new();
-
-    if messages.is_empty() && before_id.is_none() {
-        blocks.push(format!(
-            r#"<div class="sys-msg">To je začetek pogovora v #{}</div>"#,
-            html_escape(&room.name)
-        ));
-    }
-
-    let mut last_date = String::new();
-    let message_ids: Vec<i32> = messages.iter().map(|msg| msg.id).collect();
-    let reactions_counts = reaction_counts_for_messages(db, &message_ids).await?;
-    let empty_counts = BTreeMap::new();
-    for msg in &messages {
-        let sender_name = msg
-            .sender_id
-            .and_then(|id| sender_map.get(&id))
-            .map(String::as_str);
-
-        let date_str = Local
-            .timestamp_opt(msg.timestamp, 0)
-            .single()
-            .map(|dt| dt.format("%d. %m. %Y").to_string())
-            .unwrap_or_else(|| "neznan datum".to_string());
-
-        if date_str != last_date {
-            blocks.push(format!(r#"<div class="date-sep">{}</div>"#, date_str));
-            last_date = date_str;
-        }
-
-        let counts = reactions_counts.get(&msg.id).unwrap_or(&empty_counts);
-        blocks.push(render_message(msg, sender_name, msg.timestamp, counts));
-    }
-
-    blocks.reverse();
-
-    let mut html = String::new();
-    for block in blocks {
-        html.push_str(&block);
-    }
-
-    // Gumb za starejša sporočila je vizualno na vrhu, torej zadnji v DOM-u.
-    if has_more && let Some(oldest) = messages.first() {
-        html.push_str(&render_load_older_button(&room.name, oldest.id));
-    }
-
-    Ok(html)
-}
-
-fn render_load_older_button(room_name: &str, before_id: i32) -> String {
-    let name = html_escape(room_name);
-    format!(
-        r##"<button type="button" class="load-older-btn"
-            hx-get="/rooms/{name}/messages?before_id={before_id}"
-            hx-target="this"
-            hx-swap="outerHTML">
-          Naloži starejša sporočila
-        </button>"##
-    )
-}
-async fn insert_message(
-    db: &DatabaseConnection,
-    room_id: i32,
-    sender_id: Option<i64>,
-    content: &str,
-) -> Result<message::Model, AppError> {
-    let msg = message::ActiveModel {
-        sender_id: Set(sender_id),
-        content: Set(content.to_string()),
-        timestamp: Set(current_timestamp()),
-        soba_id: Set(room_id),
-        ..Default::default()
-    }
-    .insert(db)
-    .await?;
-
-    Ok(msg)
-}
-
-fn current_timestamp() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-fn render_chat_panel(room: &soba::Model, user: &AuthUser) -> String {
-    render_chat_panel_variant(room, user, false)
-}
-
-fn render_chat_panel_oob(room: &soba::Model, user: &AuthUser) -> String {
-    render_chat_panel_variant(room, user, true)
-}
-
-fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> String {
-    let name = html_escape(&room.name);
-    let username = html_escape(&user.username);
-    let id = room.id;
-    let oob_attribute = if oob {
-        r#" hx-swap-oob="outerHTML""#
-    } else {
-        ""
-    };
-    let room_control = if room.name == "general" {
-        String::new()
-    } else if room.owner_id == Some(user.id) {
-        format!(
-            r##"<button type="button" class="delete-room-btn"
-                hx-delete="/rooms/{name}"
-                hx-target="#chat-panel"
-                hx-swap="outerHTML"
-                hx-confirm="Ali res želiš izbrisati sobo #{name} in vsa njena sporočila?">
-              Izbriši sobo
-            </button>"##
-        )
-    } else {
-        format!(
-            r##"<button type="button" class="leave-room-btn"
-                hx-delete="/rooms/{name}/membership"
-                hx-target="#chat-panel"
-                hx-swap="outerHTML"
-                hx-confirm="Ali res želiš zapustiti sobo #{name}?">
-              Zapusti sobo
-            </button>"##
-        )
-    };
-
-    format!(
-        r##"
-<div class="main" id="chat-panel"{oob_attribute}
-     data-current-user-id="{user_id}"
-     data-current-username="{username}"
-     hx-ext="ws" ws-connect="/ws?room_name={name}">
-  <div class="chat-header">
-    <span class="chat-header-hash">#</span>
-    <span class="chat-header-name" id="room-title">{name}</span>
-    <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
-    <span class="connection-status connecting" data-connection-status role="status" aria-live="polite">Povezujem …</span>
-    {room_control}
-  </div>
-
-  <div class="messages" id="messages"
-    hx-get="/rooms/{name}/messages"
-    hx-trigger="load"
-    hx-swap="innerHTML">
-    <div class="sys-msg">Nalaganje sporočil za #{name}…</div>
-  </div>
-
-  <div class="input-area">
-    <div id="message-status" class="message-status" role="status" aria-live="polite"></div>
-    <form id="msg-form" ws-send>
-      <div class="input-row">
-        <textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required></textarea>
-        <button type="submit" class="send-btn" aria-label="Pošlji" disabled>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2 8L14 2L8 14L7 9L2 8Z" fill="white" stroke="white" stroke-width=".5" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </div>
-    </form>
-  </div>
-</div>
-"##,
-        name = name,
-        username = username,
-        user_id = user.id,
-        oob_attribute = oob_attribute,
-        room_control = room_control,
-        max_message_length = MAX_MESSAGE_LENGTH,
-    )
-}
-
-fn render_room_list_oob(room_list: &str) -> String {
-    format!(r#"<div id="room-list" hx-swap-oob="innerHTML">{room_list}</div>"#)
-}
-
-fn render_room_action_message_oob(kind: &str, message: &str) -> String {
-    format!(
-        r#"<div id="room-action-msg" hx-swap-oob="innerHTML">{}</div>"#,
-        render_room_action_message(kind, message)
-    )
-}
-
-fn render_room_list_reload_oob() -> String {
-    r#"<div class="room-list" id="room-list" hx-swap-oob="outerHTML"
-         hx-get="/rooms" hx-trigger="load" hx-swap="innerHTML"></div>"#
-        .to_string()
-}
-
-fn render_room_action_message(kind: &str, message: &str) -> String {
-    format!(
-        r#"<div class="room-action-message {}">{}</div>"#,
-        html_escape(kind),
-        html_escape(message)
-    )
-}
-
-fn room_action_response(kind: &str, message: &str) -> Response {
-    Html(render_room_action_message(kind, message)).into_response()
-}
-
-fn room_action_retarget_response(kind: &str, message: &str) -> Response {
-    (
-        [
-            ("HX-Retarget", "#room-action-msg"),
-            ("HX-Reswap", "innerHTML"),
-        ],
-        Html(render_room_action_message(kind, message)),
-    )
-        .into_response()
-}
-
-fn room_error_panel(message: &str) -> Response {
-    Html(format!(
-        r#"<div class="main" id="chat-panel">
-          <div class="room-panel-error">{}</div>
-        </div>"#,
-        html_escape(message)
-    ))
-    .into_response()
-}
-
-fn notify_room_deleted(
-    state: &SharedState,
-    deleted_room_id: i32,
-    deleted_room_name: &str,
-) -> Result<(), AppError> {
-    let (deleted_room_sender, other_senders) = {
-        let mut state = state
-            .lock()
-            .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?;
-        let deleted = state.soba_tx.remove(&deleted_room_id);
-        let others = state.soba_tx.values().cloned().collect::<Vec<_>>();
-        (deleted, others)
-    };
-
-    let room_list_oob = render_room_list_reload_oob();
-    for sender in other_senders {
-        let _ = sender.send(room_list_oob.clone());
-    }
-
-    if let Some(sender) = deleted_room_sender {
-        let deleted_name = html_escape(deleted_room_name);
-        let redirect_to_general = format!(
-            r##"<div class="main" id="chat-panel" hx-swap-oob="outerHTML"
-                 hx-get="/rooms/general/panel" hx-trigger="load" hx-swap="outerHTML">
-              <div class="sys-msg">Soba #{deleted_name} je bila izbrisana. Odpiram #general…</div>
-            </div>"##
-        );
-        let _ = sender.send(format!("{redirect_to_general}{room_list_oob}"));
-    }
-
-    Ok(())
-}
-
-fn notify_room_access_revoked(
-    state: &SharedState,
-    room_id: i32,
-    user_id: i32,
-    reason: RoomAccessRevokedReason,
-) -> Result<(), AppError> {
-    state
-        .lock()
-        .map_err(|_| AppError("Napaka: zaklenjeno stanje strežnika.".to_string()))?
-        .revoke_room_access(room_id, user_id, reason);
-
-    Ok(())
-}
-
-fn render_message(
-    msg: &message::Model,
-    sender_name: Option<&str>,
-    timestamp: i64,
-    reactions: &BTreeMap<String, u32>,
-) -> String {
-    let sender = sender_name
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .unwrap_or("neznan uporabnik");
-
-    let time_str = Local
-        .timestamp_opt(timestamp, 0)
-        .single()
-        .map(|dt| dt.format("%H:%M").to_string())
-        .unwrap_or_else(|| "??:??".to_string());
-
-    format!(
-        r#"<div class="msg" id="msg-{id}">
-  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span></div>
-  <div class="msg-text">{content}</div>
-  <div class="reactions" id="reactions-{id}">{oznaka}</div>
-  <div class="reaction-controls">{quick}{add_form}</div>
-</div>"#,
-        id = msg.id,
-        sender = html_escape(sender),
-        time = time_str,
-        content = html_escape(&msg.content),
-        oznaka = render_reaction_oznaka(msg.id, reactions),
-        quick = render_quick_reaction_buttons(msg.id),
-        add_form = render_reaction_add_form(msg.id),
-    )
-}
-
-fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
-    format!(
-        r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
-        render_message(msg, sender_name, timestamp, &BTreeMap::new())
-    )
-}
-
-/// Po uspešno oddanem sporočilu je treba izprazniti polje za vnos samo pri
-/// pošiljatelju — ne prek broadcast kanala sobe, ker bi to izbrisalo
-/// nedokončano besedilo drugim uporabnikom, ki ravno takrat tipkajo.
-pub fn render_message_input_reset() -> String {
-    format!(
-        r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>
-<div id="message-status" class="message-status" role="status" aria-live="polite" hx-swap-oob="true"></div>"#,
-        max_message_length = MAX_MESSAGE_LENGTH,
-    )
-}
-
-pub fn render_rate_limit_warning() -> String {
-    render_message_status(
-        "warning",
-        "Sporočila pošiljaš prehitro. Počakaj trenutek in poskusi znova.",
-    )
-}
-
-pub fn render_message_error(message: &str) -> String {
-    render_message_status("error", message)
-}
-
-fn render_message_status(kind: &str, message: &str) -> String {
-    format!(
-        r#"<div id="message-status" class="message-status {}" role="alert" aria-live="assertive" hx-swap-oob="true">{}</div>"#,
-        html_escape(kind),
-        html_escape(message)
-    )
-}
-
-fn render_room_button(room: &soba::Model, active: bool) -> String {
-    let active_class = if active { " active" } else { "" };
-    let pressed = if active { "true" } else { "false" };
-    let name = html_escape(&room.name);
-
-    format!(
-        r##"
-<button
-    type="button"
-    class="room-item{active_class}"
-    data-room-id="{id}"
-    data-room-name="{name}"
-    aria-pressed="{pressed}"
-    hx-get="/rooms/{name}/panel"
-    hx-target="#chat-panel"
-    hx-swap="outerHTML">
-    # {name}
-</button>
-"##,
-        active_class = active_class,
-        id = room.id,
-        name = name,
-        pressed = pressed,
-    )
-}
-
-fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-pub async fn toggle_reaction(
-    db: &DatabaseConnection,
-    room_id: i32,
-    user_id: i32,
-    message_id: i32,
-    emoji: &str,
-) -> Result<Option<String>, AppError> {
-    let emoji = emoji.trim();
-    if emoji.is_empty() || emoji.chars().count() > 8 {
-        return Ok(None);
-    }
-    let message_exists = Message::find_by_id(message_id)
-        .filter(message::Column::SobaId.eq(room_id))
-        .one(db)
-        .await?
-        .is_some();
-    if !message_exists {
-        return Ok(None);
-    }
-
-    let existing = MessageReactions::find()
-        .filter(message_reactions::Column::MessageId.eq(message_id))
-        .filter(message_reactions::Column::ClientId.eq(user_id))
-        .filter(message_reactions::Column::Emoji.eq(emoji))
-        .one(db)
-        .await?;
-
-    match existing {
-        Some(reaction) => {
-            MessageReactions::delete_by_id(reaction.id).exec(db).await?;
-        }
-        None => {
-            message_reactions::ActiveModel {
-                message_id: Set(message_id),
-                client_id: Set(user_id),
-                emoji: Set(emoji.to_string()),
-                ..Default::default()
-            }
-            .insert(db)
-            .await?;
-        }
-    }
-
-    let counts = reaction_counts_for_message(db, message_id).await?;
-    Ok(Some(render_reactions_oznaka_oob(message_id, &counts)))
-}
-
-async fn reaction_counts_for_message(
-    db: &DatabaseConnection,
-    message_id: i32,
-) -> Result<BTreeMap<String, u32>, AppError> {
-    let reactions = MessageReactions::find()
-        .filter(message_reactions::Column::MessageId.eq(message_id))
-        .all(db)
-        .await?;
-
-    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-    for r in &reactions {
-        *counts.entry(r.emoji.clone()).or_insert(0) += 1;
-    }
-    Ok(counts)
-}
-//poizve za vse reakcije na enkar pri nalaganju starejših sporočil
-async fn reaction_counts_for_messages(
-    db: &DatabaseConnection,
-    message_ids: &[i32],
-) -> Result<HashMap<i32, BTreeMap<String, u32>>, AppError> {
-    let reactions = MessageReactions::find()
-        .filter(message_reactions::Column::MessageId.is_in(message_ids.to_vec()))
-        .all(db)
-        .await?;
-
-    let mut map: HashMap<i32, BTreeMap<String, u32>> = HashMap::new();
-    for r in &reactions {
-        *map.entry(r.message_id)
-            .or_default()
-            .entry(r.emoji.clone())
-            .or_insert(0) += 1;
-    }
-    Ok(map)
-}
-
-//da se izpiše število in kateri emoji pod sporočilom
-fn render_reactions_oznaka_oob(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
-    format!(
-        r#"<div class="reactions" id="reactions-{id}" hx-swap-oob="innerHTML">{oznaka}</div>"#,
-        id = message_id,
-        oznaka = render_reaction_oznaka(message_id, counts),
-    )
-}
-
-fn render_reaction_oznaka(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
-    let mut oznaka = String::new();
-    for (emoji, count) in counts {
-        oznaka.push_str(&format!(
-            r#"<form class="reaction-pill-form" ws-send>
-    <input type="hidden" name="reaction_message_id" value="{id}">
-    <input type="hidden" name="reaction_emoji" value="{emoji}">
-    <button type="submit" class="reaction-pill">{emoji} {count}</button>
-  </form>"#,
-            id = message_id,
-            emoji = html_escape(emoji),
-            count = count,
-        ));
-    }
-    oznaka
-}
-
-fn render_quick_reaction_buttons(message_id: i32) -> String {
-    let mut html = String::new();
-    for emoji in QUICK_REACTIONS {
-        html.push_str(&format!(
-            r#"<form class="reaction-quick-form" ws-send>
-    <input type="hidden" name="reaction_message_id" value="{id}">
-    <input type="hidden" name="reaction_emoji" value="{emoji}">
-    <button type="submit" class="reaction-quick-btn">{emoji}</button>
-  </form>"#,
-            id = message_id,
-            emoji = emoji,
-        ));
-    }
-    html
-}
-
-fn render_reaction_add_form(message_id: i32) -> String {
-    format!(
-        r#"<form class="reaction-add-form" ws-send>
-    <input type="hidden" name="reaction_message_id" value="{id}">
-    <input type="text" name="reaction_emoji" maxlength="8"
-      placeholder="+ drugo" class="reaction-add-input">
-  </form>"#,
-        id = message_id,
-    )
-}
-fn test(){
-    let test = 32;
 }

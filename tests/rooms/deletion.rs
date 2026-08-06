@@ -1,4 +1,4 @@
-use crate::integration::{
+use crate::common::{
     body_text, form_request, recv_until, register_and_login, start_server, test_app,
     wait_for_socket_close, websocket_request,
 };

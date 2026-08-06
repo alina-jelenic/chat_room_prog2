@@ -1,4 +1,4 @@
-use crate::integration::{assert_login_redirect, body_text, form_request, test_app};
+use crate::common::{assert_login_redirect, body_text, form_request, test_app};
 use axum::http::{StatusCode, header::SET_COOKIE};
 
 use tower::ServiceExt;

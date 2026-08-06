@@ -1,4 +1,4 @@
-use crate::integration::test_app;
+use crate::common::test_app;
 
 use chat_room_prog2::{
     controller::{

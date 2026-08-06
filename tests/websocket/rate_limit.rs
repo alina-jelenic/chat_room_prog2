@@ -1,6 +1,4 @@
-use crate::integration::{
-    recv_until, register_and_login, start_server, test_app, websocket_request,
-};
+use crate::common::{recv_until, register_and_login, start_server, test_app, websocket_request};
 use chat_room_prog2::{
     controller::tipi::MESSAGE_COOLDOWN,
     entities::{message, prelude::Soba, soba},

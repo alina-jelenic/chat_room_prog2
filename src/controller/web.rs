@@ -4,7 +4,7 @@
 use crate::controller::auth::{AuthUser, auth_user_from_jar, unauthorized_response};
 use crate::controller::forms::{login_handler, register_handler};
 use crate::controller::rooms;
-use crate::controller::tipi::SharedState;
+use crate::controller::tipi::{RoomAccessRevokedReason, SharedState};
 use axum::http::StatusCode;
 use axum::{
     Router,
@@ -97,6 +97,16 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/rooms", get(rooms::list_rooms).post(rooms::create_room))
         .route("/rooms/{name}/panel", get(rooms::room_panel))
         .route("/rooms/{name}/messages", get(rooms::list_messages))
+        .route("/rooms/{name}/messages/search", get(rooms::search_messages))
+        .route(
+            "/messages/{message_id}",
+            axum::routing::delete(rooms::delete_message),
+        )
+        .route("/rooms/{name}/members", get(rooms::list_room_members))
+        .route(
+            "/rooms/{name}/members/{user_id}",
+            axum::routing::delete(rooms::kick_room_member),
+        )
         .route(
             "/rooms/{name}/membership",
             axum::routing::delete(rooms::leave_room),
@@ -171,7 +181,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
     let outgoing_room = room.clone();
     let outgoing_user_id = user.id;
 
-    let send_task = tokio::spawn(async move {
+    let mut send_task = tokio::spawn(async move {
         loop {
             tokio::select! {
                 // Obvestilo o odvzemu dostopa ima prednost pred novimi
@@ -183,7 +193,16 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                     match revoked {
                         Ok(event)
                             if event.room_id == outgoing_room.id
-                                && event.user_id == outgoing_user_id => break,
+                                && event.user_id == outgoing_user_id => {
+                                if event.reason == RoomAccessRevokedReason::Kicked {
+                                    let notification =
+                                        rooms::render_kicked_redirect(&outgoing_room.name);
+                                    let _ = sender
+                                        .send(Message::Text(notification.into()))
+                                        .await;
+                                }
+                                break;
+                            }
                         Ok(_) => continue,
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             match rooms::user_can_access_room(
@@ -225,21 +244,21 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
         }
     });
 
-    loop {
+    let access_revoked = loop {
         tokio::select! {
             biased;
 
             revoked = incoming_revocations.recv() => {
                 match revoked {
-                    Ok(event) if event.room_id == room.id && event.user_id == user.id => break,
+                    Ok(event) if event.room_id == room.id && event.user_id == user.id => break true,
                     Ok(_) => continue,
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         match rooms::user_can_access_room(&db, &room, user.id).await {
                             Ok(true) => continue,
-                            Ok(false) | Err(_) => break,
+                            Ok(false) | Err(_) => break true,
                         }
                     }
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Closed) => break false,
                 }
             }
             result = receiver.next() => {
@@ -252,7 +271,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                                 // sporočilom, ki prispe istočasno z odhodom uporabnika.
                                 match rooms::user_can_access_room(&db, &room, user.id).await {
                                     Ok(true) => {}
-                                    Ok(false) | Err(_) => break,
+                                    Ok(false) | Err(_) => break true,
                                 }
 
                                 if let Err(error) = rooms::validate_message_content(&content) {
@@ -262,7 +281,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
 
                                 let may_send = match state.lock() {
                                     Ok(mut state) => state.reserve_message_send(user.id),
-                                    Err(_) => break,
+                                    Err(_) => break false,
                                 };
                                 if !may_send {
                                     let _ = personal_tx.send(rooms::render_rate_limit_warning());
@@ -286,7 +305,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                             Some(WsAction::Reaction { message_id, emoji }) => {
                                 match rooms::user_can_access_room(&db, &room, user.id).await {
                                     Ok(true) => {}
-                                    Ok(false) | Err(_) => break,
+                                    Ok(false) | Err(_) => break true,
                                 }
 
                                 match rooms::toggle_reaction(&db, room.id, user.id, message_id, &emoji).await {
@@ -301,14 +320,19 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                         }
                     }
 
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None => break false,
                     Some(Ok(_)) => {}
-                    Some(Err(_)) => break,
+                    Some(Err(_)) => break false,
                 }
             }
         }
-    }
+    };
 
+    if access_revoked {
+        // Počakamo, da pošiljalna naloga izgnjenemu uporabniku pošlje obvestilo
+        // in preusmeritev, preden zapremo njegovo povezavo.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), &mut send_task).await;
+    }
     send_task.abort();
 }
 
