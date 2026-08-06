@@ -11,9 +11,16 @@ pub type SharedState = Arc<Mutex<ServerState>>;
 pub const MESSAGE_COOLDOWN: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoomAccessRevokedReason {
+    Left,
+    Kicked,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoomAccessRevoked {
     pub room_id: i32,
     pub user_id: i32,
+    pub reason: RoomAccessRevokedReason,
 }
 
 pub struct ServerState {
@@ -39,10 +46,12 @@ impl ServerState {
         self.room_access_revoked_tx.subscribe()
     }
 
-    pub fn revoke_room_access(&self, room_id: i32, user_id: i32) {
-        let _ = self
-            .room_access_revoked_tx
-            .send(RoomAccessRevoked { room_id, user_id });
+    pub fn revoke_room_access(&self, room_id: i32, user_id: i32, reason: RoomAccessRevokedReason) {
+        let _ = self.room_access_revoked_tx.send(RoomAccessRevoked {
+            room_id,
+            user_id,
+            reason,
+        });
     }
 
     /// Rezervira naslednje pošiljanje. `false` pomeni, da uporabnikov prejšnji
