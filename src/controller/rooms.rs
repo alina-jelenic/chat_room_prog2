@@ -1206,3 +1206,6 @@ fn render_reaction_add_form(message_id: i32) -> String {
         id = message_id,
     )
 }
+fn test(){
+    let test = 32;
+}
