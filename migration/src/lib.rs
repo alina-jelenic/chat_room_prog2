@@ -8,6 +8,7 @@ mod m20260531_000002_message_soba_id;
 mod m20260719_000001_client_username_unique;
 mod m20260726_000001_room_membership;
 mod m20260727_000001_message_soba_on_delete;
+mod m20260806_000001_message_reactions;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260719_000001_client_username_unique::Migration),
             Box::new(m20260726_000001_room_membership::Migration),
             Box::new(m20260727_000001_message_soba_on_delete::Migration),
+            Box::new(m20260806_000001_message_reactions::Migration),
         ]
     }
 }

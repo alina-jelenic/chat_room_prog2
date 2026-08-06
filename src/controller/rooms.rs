@@ -1,8 +1,8 @@
 use crate::controller::auth::{AuthUser, require_auth};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
-use crate::entities::prelude::{Client, Message, RoomMember, Soba};
-use crate::entities::{client, message, room_member, soba};
+use crate::entities::prelude::{Client, Message, MessageReactions, RoomMember, Soba};
+use crate::entities::{client, message, message_reactions, room_member, soba};
 use axum::{
     extract::{Form, Path, Query, State},
     http::StatusCode,
@@ -16,7 +16,7 @@ use sea_orm::{
     QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +27,8 @@ pub struct CreateRoomForm {
 const MAX_MESSAGE_LENGTH: usize = 2000;
 
 const MESSAGES_PAGE_SIZE: u64 = 50;
+
+const QUICK_REACTIONS: [&str; 5] = ["👍", "❤️", "😂", "😮", "😢"];
 
 #[derive(Debug, Deserialize)]
 pub struct MessagesQuery {
@@ -700,6 +702,9 @@ async fn render_messages_page(
     }
 
     let mut last_date = String::new();
+    let message_ids: Vec<i32> = messages.iter().map(|msg| msg.id).collect();
+    let reactions_counts = reaction_counts_for_messages(db, &message_ids).await?;
+    let empty_counts = BTreeMap::new();
     for msg in &messages {
         let sender_name = msg
             .sender_id
@@ -717,7 +722,8 @@ async fn render_messages_page(
             last_date = date_str;
         }
 
-        blocks.push(render_message(msg, sender_name, msg.timestamp));
+        let counts = reactions_counts.get(&msg.id).unwrap_or(&empty_counts);
+        blocks.push(render_message(msg, sender_name, msg.timestamp, counts));
     }
 
     blocks.reverse();
@@ -952,7 +958,12 @@ fn notify_room_access_revoked(
     Ok(())
 }
 
-fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
+fn render_message(
+    msg: &message::Model,
+    sender_name: Option<&str>,
+    timestamp: i64,
+    reactions: &BTreeMap<String, u32>,
+) -> String {
     let sender = sender_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
@@ -965,20 +976,26 @@ fn render_message(msg: &message::Model, sender_name: Option<&str>, timestamp: i6
         .unwrap_or_else(|| "??:??".to_string());
 
     format!(
-        r#"<div class="msg">
-  <div class="msg-head"><span class="msg-sender">{}</span><span class="time">{}</span></div>
-  <div class="msg-text">{}</div>
+        r#"<div class="msg" id="msg-{id}">
+  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span></div>
+  <div class="msg-text">{content}</div>
+  <div class="reactions" id="reactions-{id}">{oznaka}</div>
+  <div class="reaction-controls">{quick}{add_form}</div>
 </div>"#,
-        html_escape(sender),
-        time_str,
-        html_escape(&msg.content)
+        id = msg.id,
+        sender = html_escape(sender),
+        time = time_str,
+        content = html_escape(&msg.content),
+        oznaka = render_reaction_oznaka(msg.id, reactions),
+        quick = render_quick_reaction_buttons(msg.id),
+        add_form = render_reaction_add_form(msg.id),
     )
 }
 
 fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
     format!(
         r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
-        render_message(msg, sender_name, timestamp)
+        render_message(msg, sender_name, timestamp, &BTreeMap::new())
     )
 }
 
@@ -1025,4 +1042,139 @@ fn html_escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+pub async fn toggle_reaction(
+    db: &DatabaseConnection,
+    room_id: i32,
+    user_id: i32,
+    message_id: i32,
+    emoji: &str,
+) -> Result<Option<String>, AppError> {
+    let emoji = emoji.trim();
+    if emoji.is_empty() || emoji.chars().count() > 8 {
+        return Ok(None);
+    }
+    let message_exists = Message::find_by_id(message_id)
+        .filter(message::Column::SobaId.eq(room_id))
+        .one(db)
+        .await?
+        .is_some();
+    if !message_exists {
+        return Ok(None);
+    }
+
+    let existing = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.eq(message_id))
+        .filter(message_reactions::Column::ClientId.eq(user_id))
+        .filter(message_reactions::Column::Emoji.eq(emoji))
+        .one(db)
+        .await?;
+
+    match existing {
+        Some(reaction) => {
+            MessageReactions::delete_by_id(reaction.id).exec(db).await?;
+        }
+        None => {
+            message_reactions::ActiveModel {
+                message_id: Set(message_id),
+                client_id: Set(user_id),
+                emoji: Set(emoji.to_string()),
+                ..Default::default()
+            }
+            .insert(db)
+            .await?;
+        }
+    }
+
+    let counts = reaction_counts_for_message(db, message_id).await?;
+    Ok(Some(render_reactions_oznaka_oob(message_id, &counts)))
+}
+
+async fn reaction_counts_for_message(
+    db: &DatabaseConnection,
+    message_id: i32,
+) -> Result<BTreeMap<String, u32>, AppError> {
+    let reactions = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.eq(message_id))
+        .all(db)
+        .await?;
+
+    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    for r in &reactions {
+        *counts.entry(r.emoji.clone()).or_insert(0) += 1;
+    }
+    Ok(counts)
+}
+//poizve za vse reakcije na enkar pri nalaganju starejših sporočil
+async fn reaction_counts_for_messages(
+    db: &DatabaseConnection,
+    message_ids: &[i32],
+) -> Result<HashMap<i32, BTreeMap<String, u32>>, AppError> {
+    let reactions = MessageReactions::find()
+        .filter(message_reactions::Column::MessageId.is_in(message_ids.to_vec()))
+        .all(db)
+        .await?;
+
+    let mut map: HashMap<i32, BTreeMap<String, u32>> = HashMap::new();
+    for r in &reactions {
+        *map.entry(r.message_id)
+            .or_default()
+            .entry(r.emoji.clone())
+            .or_insert(0) += 1;
+    }
+    Ok(map)
+}
+
+//da se izpiše število in kateri emoji pod sporočilom
+fn render_reactions_oznaka_oob(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
+    format!(
+        r#"<div class="reactions" id="reactions-{id}" hx-swap-oob="innerHTML">{oznaka}</div>"#,
+        id = message_id,
+        oznaka = render_reaction_oznaka(message_id, counts),
+    )
+}
+
+fn render_reaction_oznaka(message_id: i32, counts: &BTreeMap<String, u32>) -> String {
+    let mut oznaka = String::new();
+    for (emoji, count) in counts {
+        oznaka.push_str(&format!(
+            r#"<form class="reaction-pill-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="hidden" name="reaction_emoji" value="{emoji}">
+    <button type="submit" class="reaction-pill">{emoji} {count}</button>
+  </form>"#,
+            id = message_id,
+            emoji = html_escape(emoji),
+            count = count,
+        ));
+    }
+    oznaka
+}
+
+fn render_quick_reaction_buttons(message_id: i32) -> String {
+    let mut html = String::new();
+    for emoji in QUICK_REACTIONS {
+        html.push_str(&format!(
+            r#"<form class="reaction-quick-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="hidden" name="reaction_emoji" value="{emoji}">
+    <button type="submit" class="reaction-quick-btn">{emoji}</button>
+  </form>"#,
+            id = message_id,
+            emoji = emoji,
+        ));
+    }
+    html
+}
+
+fn render_reaction_add_form(message_id: i32) -> String {
+    format!(
+        r#"<form class="reaction-add-form" ws-send>
+    <input type="hidden" name="reaction_message_id" value="{id}">
+    <input type="text" name="reaction_emoji" maxlength="8"
+      placeholder="+ drugo" class="reaction-add-input">
+  </form>"#,
+        id = message_id,
+    )
 }

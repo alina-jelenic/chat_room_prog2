@@ -65,6 +65,13 @@ struct WsQuery {
 #[derive(Debug, Deserialize)]
 struct WsIncomingMessage {
     content: Option<String>,
+    reaction_message_id: Option<String>,
+    reaction_emoji: Option<String>,
+}
+
+enum WsAction {
+    Message(String),
+    Reaction { message_id: i32, emoji: String },
 }
 
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
@@ -238,25 +245,41 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
             result = receiver.next() => {
                 match result {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(content) = websocket_content(&text) {
-                            // Članstvo se lahko spremeni tudi po vzpostavitvi povezave.
-                            // Preverba pred shranjevanjem ostane dodatna zaščita pred
-                            // sporočilom, ki prispe istočasno z odhodom uporabnika.
-                            match rooms::user_can_access_room(&db, &room, user.id).await {
-                                Ok(true) => {}
-                                Ok(false) | Err(_) => break,
-                            }
-
-                            match rooms::create_websocket_message(&db, room.id, &user, &content).await {
-                                Ok(html) if !html.is_empty() => {
-                                    let _ = tx.send(html);
-                                    let _ = personal_tx.send(rooms::render_message_input_reset());
+                        match websocket_action(&text) {
+                            Some(WsAction::Message(content)) => {
+                                // Članstvo se lahko spremeni tudi po vzpostavitvi povezave.
+                                match rooms::user_can_access_room(&db, &room, user.id).await {
+                                    Ok(true) => {}
+                                    Ok(false) | Err(_) => break,
                                 }
-                                Ok(_) => {}
-                                Err(e) => eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}"),
+
+                                match rooms::create_websocket_message(&db, room.id, &user, &content).await {
+                                    Ok(html) if !html.is_empty() => {
+                                        let _ = tx.send(html);
+                                        let _ = personal_tx.send(rooms::render_message_input_reset());
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}"),
+                                }
                             }
+                            Some(WsAction::Reaction { message_id, emoji }) => {
+                                match rooms::user_can_access_room(&db, &room, user.id).await {
+                                    Ok(true) => {}
+                                    Ok(false) | Err(_) => break,
+                                }
+
+                                match rooms::toggle_reaction(&db, room.id, user.id, message_id, &emoji).await {
+                                    Ok(Some(html)) => {
+                                        let _ = tx.send(html);
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => eprintln!("Napaka pri shranjevanju reakcije WebSocket: {e}"),
+                                }
+                            }
+                            None => {}
                         }
                     }
+
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => {}
                     Some(Err(_)) => break,
@@ -276,20 +299,30 @@ fn db_from_state(state: &SharedState) -> Result<DatabaseConnection, AppError> {
         .clone())
 }
 
-fn websocket_content(text: &str) -> Option<String> {
-    // HTMX ws-send pošlje formo kot JSON, npr. {"content":"živjo", "HEADERS":{...}}.
-    // Fallback podpira tudi ročno WebSocket testiranje z navadnim tekstom.
+fn websocket_action(text: &str) -> Option<WsAction> {
     if let Ok(message) = serde_json::from_str::<WsIncomingMessage>(text) {
+        if let (Some(message_id_raw), Some(emoji)) =
+            (message.reaction_message_id, message.reaction_emoji)
+        {
+            let emoji = emoji.trim().to_string();
+            if emoji.is_empty() {
+                return None;
+            }
+            let message_id = message_id_raw.trim().parse::<i32>().ok()?;
+            return Some(WsAction::Reaction { message_id, emoji });
+        }
+
         return message
             .content
             .map(|content| content.trim().to_string())
-            .filter(|content| !content.is_empty());
+            .filter(|content| !content.is_empty())
+            .map(WsAction::Message);
     }
 
     let content = text.trim().to_string();
     if content.is_empty() {
         None
     } else {
-        Some(content)
+        Some(WsAction::Message(content))
     }
 }

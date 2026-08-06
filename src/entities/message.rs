@@ -24,11 +24,19 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     Client,
+    #[sea_orm(has_many = "super::message_reactions::Entity")]
+    MessageReaction,
 }
 
 impl Related<super::client::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Client.def()
+    }
+}
+
+impl Related<super::message_reactions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::MessageReaction.def()
     }
 }
 
