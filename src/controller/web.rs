@@ -248,25 +248,26 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                         match websocket_action(&text) {
                             Some(WsAction::Message(content)) => {
                                 // Članstvo se lahko spremeni tudi po vzpostavitvi povezave.
+                                // Preverba pred shranjevanjem ostane dodatna zaščita pred
+                                // sporočilom, ki prispe istočasno z odhodom uporabnika.
                                 match rooms::user_can_access_room(&db, &room, user.id).await {
                                     Ok(true) => {}
                                     Ok(false) | Err(_) => break,
                                 }
 
                                 if let Err(error) = rooms::validate_message_content(&content) {
-                                let _ = personal_tx.send(rooms::render_message_error(&error.0));
-                                continue;
-                            }
+                                    let _ = personal_tx.send(rooms::render_message_error(&error.0));
+                                    continue;
+                                }
 
-                            let may_send = match state.lock() {
-                                Ok(mut state) => state.reserve_message_send(user.id),
-                                Err(_) => break,
-                            };
-                            if !may_send {
-                                let _ = personal_tx.send(rooms::render_rate_limit_warning());
-                                continue;
-                            }
-
+                                let may_send = match state.lock() {
+                                    Ok(mut state) => state.reserve_message_send(user.id),
+                                    Err(_) => break,
+                                };
+                                if !may_send {
+                                    let _ = personal_tx.send(rooms::render_rate_limit_warning());
+                                    continue;
+                                }
 
                                 match rooms::create_websocket_message(&db, room.id, &user, &content).await {
                                     Ok(html) if !html.is_empty() => {
@@ -275,11 +276,11 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                                     }
                                     Ok(_) => {}
                                     Err(e) => {
-                                    eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}");
-                                    let _ = personal_tx.send(rooms::render_message_error(
-                                        "Sporočila ni bilo mogoče poslati.",
-                                    ));
-                                }
+                                        eprintln!("Napaka pri shranjevanju sporočila WebSocket: {e}");
+                                        let _ = personal_tx.send(rooms::render_message_error(
+                                            "Sporočila ni bilo mogoče poslati.",
+                                        ));
+                                    }
                                 }
                             }
                             Some(WsAction::Reaction { message_id, emoji }) => {

@@ -27,19 +27,11 @@ pub struct CreateRoomForm {
 const MAX_MESSAGE_LENGTH: usize = 2000;
 
 const MESSAGES_PAGE_SIZE: u64 = 50;
-const SEARCH_RESULTS_PAGE_SIZE: u64 = 30;
-const MAX_SEARCH_LENGTH: usize = 100;
 
 const QUICK_REACTIONS: [&str; 5] = ["👍", "❤️", "😂", "😮", "😢"];
 
 #[derive(Debug, Deserialize)]
 pub struct MessagesQuery {
-    pub before_id: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SearchMessagesQuery {
-    pub q: Option<String>,
     pub before_id: Option<i32>,
 }
 
@@ -831,51 +823,19 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
             </button>"##
         )
     };
-    let room_members = if room.owner_id == Some(user.id) {
-        format!(
-            r##"<section class="room-members" id="room-members"
-                 hx-get="/rooms/{name}/members"
-                 hx-trigger="load"
-                 hx-swap="innerHTML">
-              <div class="members-empty">Nalagam člane …</div>
-            </section>"##
-        )
-    } else {
-        String::new()
-    };
 
     format!(
         r##"
-<div class="main current-user-{user_id}" id="chat-panel"{oob_attribute}
+<div class="main" id="chat-panel"{oob_attribute}
      data-current-user-id="{user_id}"
      data-current-username="{username}"
      hx-ext="ws" ws-connect="/ws?room_name={name}">
-  <style>.current-user-{user_id} .sender-{user_id} .message-delete-btn {{ display: inline-flex; }}</style>
   <div class="chat-header">
     <span class="chat-header-hash">#</span>
     <span class="chat-header-name" id="room-title">{name}</span>
     <span class="room-id" style="font-size:0.7rem; color:var(--muted); margin-left:8px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:10px;">ID: {id}</span>
     <span class="connection-status connecting" data-connection-status role="status" aria-live="polite">Povezujem …</span>
     {room_control}
-  </div>
-
-  {room_members}
-
-  <div class="message-search">
-    <form class="message-search-form"
-          hx-get="/rooms/{name}/messages/search"
-          hx-target="#message-search-results"
-          hx-swap="innerHTML">
-      <input type="search" name="q" maxlength="{max_search_length}"
-             placeholder="Išči po zgodovini …" aria-label="Išči po zgodovini sporočil" required>
-      <button type="submit" class="search-btn">Išči</button>
-      <button type="reset" class="clear-search-btn"
-              hx-get="/rooms/{name}/messages/search"
-              hx-params="none"
-              hx-target="#message-search-results"
-              hx-swap="innerHTML">Počisti</button>
-    </form>
-    <div class="message-search-results" id="message-search-results" aria-live="polite"></div>
   </div>
 
   <div class="messages" id="messages"
@@ -905,9 +865,7 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
         user_id = user.id,
         oob_attribute = oob_attribute,
         room_control = room_control,
-        room_members = room_members,
         max_message_length = MAX_MESSAGE_LENGTH,
-        max_search_length = MAX_SEARCH_LENGTH,
     )
 }
 
