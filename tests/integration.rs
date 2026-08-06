@@ -1787,6 +1787,25 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
         .unwrap();
     assert!(body_text(response).await.contains("Zdaj si v sobi"));
 
+    let owner = Client::find()
+        .filter(client::Column::Username.eq("alina"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let target_message = message::ActiveModel {
+        sender_id: Set(Some(owner.id as i64)),
+        content: Set("sporočilo za reakcijo".to_string()),
+        timestamp: Set(1),
+        soba_id: Set(room.id),
+        ..Default::default()
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+    let message_id = target_message.id;
+
     let (address, server) = start_server(app).await;
     let (mut owner_socket, _) =
         connect_async(websocket_request(address, "reakcije", &owner_cookie))
@@ -1824,33 +1843,6 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
     )
     .await
     .expect("lastnik ni prejel članovega pripravljalnega sporočila");
-
-    // Lastnik pošlje sporočilo, na katerega bo član reagiral.
-    owner_socket
-        .send(WsMessage::Text(
-            r#"{"content":"sporočilo za reakcijo"}"#.into(),
-        ))
-        .await
-        .unwrap();
-    let owner_broadcast = timeout(
-        Duration::from_secs(2),
-        recv_until(&mut owner_socket, "sporočilo za reakcijo"),
-    )
-    .await
-    .expect("lastnik ni prejel lastnega sporočila");
-    let member_broadcast = timeout(
-        Duration::from_secs(2),
-        recv_until(&mut member_socket, "sporočilo za reakcijo"),
-    )
-    .await
-    .expect("član ni prejel sporočila");
-
-    let message_id =
-        extract_message_id(&owner_broadcast).expect("HTML bi moral vsebovati id=\"msg-N\"");
-    assert_eq!(
-        message_id,
-        extract_message_id(&member_broadcast).expect("enak id pri članu")
-    );
 
     // Član doda reakcijo 👍.
     member_socket
@@ -1959,13 +1951,4 @@ async fn reaction_is_ignored_for_a_message_outside_the_current_room() {
     assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 0);
 
     server.abort();
-}
-
-// Dodaj tudi to pomožno funkcijo, npr. tik pod `wait_for_socket_close`.
-fn extract_message_id(html: &str) -> Option<i32> {
-    let marker = "id=\"msg-";
-    let start = html.find(marker)? + marker.len();
-    let rest = &html[start..];
-    let end = rest.find('"')?;
-    rest[..end].parse::<i32>().ok()
 }

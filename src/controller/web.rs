@@ -305,7 +305,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                     Some(Ok(_)) => {}
                     Some(Err(_)) => break,
                 }
-            }    
+            }
         }
     }
 
