@@ -144,6 +144,7 @@ pub async fn create_websocket_message(
     room_id: i32,
     user: &AuthUser,
     content: &str,
+    reply_to_id: Option<i32>,
 ) -> Result<String, AppError> {
     let content = content.trim();
     if content.is_empty() {
@@ -158,11 +159,26 @@ pub async fn create_websocket_message(
         return Ok(String::new());
     }
 
-    let msg = insert_message(db, room_id, Some(user.id as i64), content).await?;
+    let reply_to_id = match reply_to_id {
+        Some(id) => {
+            let exists = Message::find_by_id(id)
+                .filter(message::Column::SobaId.eq(room_id))
+                .one(db)
+                .await?
+                .is_some();
+            exists.then_some(id)
+        }
+        None => None,
+    };
+
+    let msg = insert_message(db, room_id, Some(user.id as i64), content, reply_to_id).await?;
+    let previews = reply_previews_for_messages(db, std::slice::from_ref(&msg)).await?;
+    let reply_preview = msg.reply_to_id.and_then(|id| previews.get(&id));
     Ok(render_message_oob(
         &msg,
         Some(&user.username),
         msg.timestamp,
+        reply_preview,
     ))
 }
 
@@ -225,6 +241,7 @@ async fn render_messages_page(
     let message_ids: Vec<i32> = messages.iter().map(|msg| msg.id).collect();
     let reactions_counts = reaction_counts_for_messages(db, &message_ids).await?;
     let empty_counts = BTreeMap::new();
+    let reply_previews = reply_previews_for_messages(db, &messages).await?;
     for msg in &messages {
         let sender_name = msg
             .sender_id
@@ -243,7 +260,14 @@ async fn render_messages_page(
         }
 
         let counts = reactions_counts.get(&msg.id).unwrap_or(&empty_counts);
-        blocks.push(render_message(msg, sender_name, msg.timestamp, counts));
+        let preview = msg.reply_to_id.and_then(|id| reply_previews.get(&id));
+        blocks.push(render_message(
+            msg,
+            sender_name,
+            msg.timestamp,
+            counts,
+            preview,
+        ));
     }
 
     blocks.reverse();
@@ -362,12 +386,14 @@ async fn insert_message(
     room_id: i32,
     sender_id: Option<i64>,
     content: &str,
+    reply_to_id: Option<i32>,
 ) -> Result<message::Model, AppError> {
     let msg = message::ActiveModel {
         sender_id: Set(sender_id),
         content: Set(content.to_string()),
         timestamp: Set(current_timestamp()),
         soba_id: Set(room_id),
+        reply_to_id: Set(reply_to_id),
         ..Default::default()
     }
     .insert(db)
@@ -388,6 +414,7 @@ fn render_message(
     sender_name: Option<&str>,
     timestamp: i64,
     reactions: &BTreeMap<String, u32>,
+    reply_preview: Option<&ReplyPreview>,
 ) -> String {
     let sender = sender_name
         .map(str::trim)
@@ -401,10 +428,31 @@ fn render_message(
         .unwrap_or_else(|| "??:??".to_string());
 
     let (sender_class, sender_id, delete_button) = message_owner_controls(msg);
+    let quote_html = reply_preview
+        .map(|p| {
+            format!(
+                r#"<div class="reply-quote"><span class="reply-quote-sender">{}</span><span class="reply-quote-text">{}</span></div>"#,
+                html_escape(&p.sender_name),
+                html_escape(&truncate_preview(&p.content)),
+            )
+        })
+        .unwrap_or_default();
+
+    let reply_button = format!(
+        r##"<button type="button" class="message-reply-btn"
+                aria-label="Odgovori na sporočilo"
+                data-message-id="{id}"
+                data-sender="{sender}"
+                data-preview="{preview}">Odgovori</button>"##,
+        id = msg.id,
+        sender = html_escape(sender),
+        preview = html_escape(&truncate_preview(&msg.content)),
+    );
 
     format!(
         r#"<div class="msg {sender_class}" id="msg-{id}" data-sender-id="{sender_id}">
-  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span>{delete_button}</div>
+  <div class="msg-head"><span class="msg-sender">{sender}</span><span class="time">{time}</span>{reply_button}{delete_button}</div>
+  {quote_html}
   <div class="msg-text">{content}</div>
   <div class="reactions" id="reactions-{id}">{oznaka}</div>
   <div class="reaction-controls">{quick}{add_form}</div>
@@ -414,7 +462,9 @@ fn render_message(
         sender_id = sender_id,
         sender = html_escape(sender),
         time = time_str,
+        reply_button = reply_button,
         delete_button = delete_button,
+        quote_html = quote_html,
         content = html_escape(&msg.content),
         oznaka = render_reaction_oznaka(msg.id, reactions),
         quick = render_quick_reaction_buttons(msg.id),
@@ -467,10 +517,15 @@ fn message_owner_controls(msg: &message::Model) -> (String, String, String) {
     }
 }
 
-fn render_message_oob(msg: &message::Model, sender_name: Option<&str>, timestamp: i64) -> String {
+fn render_message_oob(
+    msg: &message::Model,
+    sender_name: Option<&str>,
+    timestamp: i64,
+    reply_preview: Option<&ReplyPreview>,
+) -> String {
     format!(
         r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
-        render_message(msg, sender_name, timestamp, &BTreeMap::new())
+        render_message(msg, sender_name, timestamp, &BTreeMap::new(), reply_preview)
     )
 }
 
@@ -487,7 +542,12 @@ fn render_message_deletion_oob(message_id: i32) -> String {
 pub fn render_message_input_reset() -> String {
     format!(
         r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>
-<div id="message-status" class="message-status" role="status" aria-live="polite" hx-swap-oob="true"></div>"#,
+<div id="message-status" class="message-status" role="status" aria-live="polite" hx-swap-oob="true"></div>
+<input type="hidden" name="reply_to_id" id="reply-to-input" value="" hx-swap-oob="true">
+<div id="reply-banner" class="reply-banner" hidden hx-swap-oob="true">
+  <span class="reply-banner-text" id="reply-banner-text"></span>
+  <button type="button" class="reply-cancel-btn" id="reply-cancel-btn" aria-label="Prekliči odgovor">✕</button>
+</div>"#,
         max_message_length = MAX_MESSAGE_LENGTH,
     )
 }
@@ -509,4 +569,62 @@ fn render_message_status(kind: &str, message: &str) -> String {
         html_escape(kind),
         html_escape(message)
     )
+}
+
+//za reply potem potrebno prestaviti
+pub struct ReplyPreview {
+    sender_name: String,
+    content: String,
+}
+
+pub async fn reply_previews_for_messages(
+    db: &DatabaseConnection,
+    messages: &[message::Model],
+) -> Result<HashMap<i32, ReplyPreview>, AppError> {
+    let reply_ids: Vec<i32> = messages.iter().filter_map(|m| m.reply_to_id).collect();
+    if reply_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let targets = Message::find()
+        .filter(message::Column::Id.is_in(reply_ids))
+        .all(db)
+        .await?;
+
+    let sender_ids: Vec<i64> = targets.iter().filter_map(|t| t.sender_id).collect();
+    let clients = Client::find()
+        .filter(client::Column::Id.is_in(sender_ids))
+        .all(db)
+        .await?;
+    let sender_map: HashMap<i64, String> = clients
+        .into_iter()
+        .map(|c| (c.id as i64, c.username))
+        .collect();
+
+    Ok(targets
+        .into_iter()
+        .map(|t| {
+            let sender_name = t
+                .sender_id
+                .and_then(|id| sender_map.get(&id).cloned())
+                .unwrap_or_else(|| "neznan uporabnik".to_string());
+            (
+                t.id,
+                ReplyPreview {
+                    sender_name,
+                    content: t.content,
+                },
+            )
+        })
+        .collect())
+}
+
+fn truncate_preview(content: &str) -> String {
+    const MAX_PREVIEW_LENGTH: usize = 60;
+    if content.chars().count() <= MAX_PREVIEW_LENGTH {
+        content.to_string()
+    } else {
+        let truncated: String = content.chars().take(MAX_PREVIEW_LENGTH).collect();
+        format!("{}…", truncated)
+    }
 }

@@ -12,6 +12,7 @@ pub struct Model {
     pub content: String,
     pub timestamp: i64,
     pub soba_id: i32,
+    pub reply_to_id: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

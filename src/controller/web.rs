@@ -65,13 +65,20 @@ struct WsQuery {
 #[derive(Debug, Deserialize)]
 struct WsIncomingMessage {
     content: Option<String>,
+    reply_to_id: Option<String>,
     reaction_message_id: Option<String>,
     reaction_emoji: Option<String>,
 }
 
 enum WsAction {
-    Message(String),
-    Reaction { message_id: i32, emoji: String },
+    Message {
+        content: String,
+        reply_to_id: Option<i32>,
+    },
+    Reaction {
+        message_id: i32,
+        emoji: String,
+    },
 }
 
 pub async fn run_websocket(state: SharedState) -> Result<(), Box<dyn std::error::Error>> {
@@ -265,7 +272,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                 match result {
                     Some(Ok(Message::Text(text))) => {
                         match websocket_action(&text) {
-                            Some(WsAction::Message(content)) => {
+                            Some(WsAction::Message { content, reply_to_id }) => {
                                 // Članstvo se lahko spremeni tudi po vzpostavitvi povezave.
                                 // Preverba pred shranjevanjem ostane dodatna zaščita pred
                                 // sporočilom, ki prispe istočasno z odhodom uporabnika.
@@ -288,7 +295,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                                     continue;
                                 }
 
-                                match rooms::create_websocket_message(&db, room.id, &user, &content).await {
+                                match rooms::create_websocket_message(&db, room.id, &user, &content, reply_to_id).await {
                                     Ok(html) if !html.is_empty() => {
                                         let _ = tx.send(html);
                                         let _ = personal_tx.send(rooms::render_message_input_reset());
@@ -357,17 +364,30 @@ fn websocket_action(text: &str) -> Option<WsAction> {
             return Some(WsAction::Reaction { message_id, emoji });
         }
 
+        let reply_to_id = message
+            .reply_to_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<i32>().ok());
+
         return message
             .content
             .map(|content| content.trim().to_string())
             .filter(|content| !content.is_empty())
-            .map(WsAction::Message);
+            .map(|content| WsAction::Message {
+                content,
+                reply_to_id,
+            });
     }
 
     let content = text.trim().to_string();
     if content.is_empty() {
         None
     } else {
-        Some(WsAction::Message(content))
+        Some(WsAction::Message {
+            content,
+            reply_to_id: None,
+        })
     }
 }

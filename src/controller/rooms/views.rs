@@ -188,7 +188,12 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
 
   <div class="input-area">
     <div id="message-status" class="message-status" role="status" aria-live="polite"></div>
+    <div id="reply-banner" class="reply-banner" hidden>
+      <span class="reply-banner-text" id="reply-banner-text"></span>
+      <button type="button" class="reply-cancel-btn" id="reply-cancel-btn" aria-label="Prekliči odgovor">✕</button>
+    </div>
     <form id="msg-form" ws-send>
+      <input type="hidden" name="reply_to_id" id="reply-to-input" value="">
       <div class="input-row">
         <textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required></textarea>
         <button type="submit" class="send-btn" aria-label="Pošlji" disabled>
@@ -198,7 +203,7 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
         </button>
       </div>
     </form>
-  </div>
+</div>
 </div>
 "##,
         name = name,
