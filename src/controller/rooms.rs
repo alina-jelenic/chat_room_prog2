@@ -21,6 +21,7 @@ use serde::Deserialize;
 
 mod messages;
 mod reactions;
+pub mod reply;
 mod views;
 
 pub use messages::{

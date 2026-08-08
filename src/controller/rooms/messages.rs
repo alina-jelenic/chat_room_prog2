@@ -7,6 +7,9 @@ use super::reactions::{
 use super::views::{broadcast_room_html, html_escape};
 use super::{authenticated_user, db_from_state, room_for_websocket, user_can_access_room};
 use crate::controller::auth::AuthUser;
+use crate::controller::rooms::reply::{
+    ReplyPreview, reply_previews_for_messages, truncate_preview,
+};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, Message, Soba};
@@ -158,6 +161,10 @@ pub async fn create_websocket_message(
         // Sporočila ne shranimo — vrnemo prazen niz, enako kot pri praznem sporočilu.
         return Ok(String::new());
     }
+    let room = match Soba::find_by_id(room_id).one(db).await? {
+        Some(room) => room,
+        None => return Ok(String::new()),
+    };
 
     let reply_to_id = match reply_to_id {
         Some(id) => {
@@ -175,6 +182,7 @@ pub async fn create_websocket_message(
     let previews = reply_previews_for_messages(db, std::slice::from_ref(&msg)).await?;
     let reply_preview = msg.reply_to_id.and_then(|id| previews.get(&id));
     Ok(render_message_oob(
+        &room.name,
         &msg,
         Some(&user.username),
         msg.timestamp,
@@ -262,6 +270,7 @@ async fn render_messages_page(
         let counts = reactions_counts.get(&msg.id).unwrap_or(&empty_counts);
         let preview = msg.reply_to_id.and_then(|id| reply_previews.get(&id));
         blocks.push(render_message(
+            &room.name,
             msg,
             sender_name,
             msg.timestamp,
@@ -410,6 +419,7 @@ fn current_timestamp() -> i64 {
 }
 
 fn render_message(
+    room_name: &str,
     msg: &message::Model,
     sender_name: Option<&str>,
     timestamp: i64,
@@ -441,12 +451,11 @@ fn render_message(
     let reply_button = format!(
         r##"<button type="button" class="message-reply-btn"
                 aria-label="Odgovori na sporočilo"
-                data-message-id="{id}"
-                data-sender="{sender}"
-                data-preview="{preview}">Odgovori</button>"##,
+                hx-get="/rooms/{room_name}/reply/{id}"
+                hx-target="this"
+                hx-swap="none">Odgovori</button>"##,
+        room_name = html_escape(room_name),
         id = msg.id,
-        sender = html_escape(sender),
-        preview = html_escape(&truncate_preview(&msg.content)),
     );
 
     format!(
@@ -518,6 +527,7 @@ fn message_owner_controls(msg: &message::Model) -> (String, String, String) {
 }
 
 fn render_message_oob(
+    room_name: &str,
     msg: &message::Model,
     sender_name: Option<&str>,
     timestamp: i64,
@@ -525,7 +535,14 @@ fn render_message_oob(
 ) -> String {
     format!(
         r#"<div id="messages" hx-swap-oob="afterbegin">{}</div>"#,
-        render_message(msg, sender_name, timestamp, &BTreeMap::new(), reply_preview)
+        render_message(
+            room_name,
+            msg,
+            sender_name,
+            timestamp,
+            &BTreeMap::new(),
+            reply_preview
+        )
     )
 }
 
@@ -543,12 +560,9 @@ pub fn render_message_input_reset() -> String {
     format!(
         r#"<textarea name="content" id="msg-input" rows="1" maxlength="{max_message_length}" placeholder="Sporočilo…" required hx-swap-oob="true"></textarea>
 <div id="message-status" class="message-status" role="status" aria-live="polite" hx-swap-oob="true"></div>
-<input type="hidden" name="reply_to_id" id="reply-to-input" value="" hx-swap-oob="true">
-<div id="reply-banner" class="reply-banner" hidden hx-swap-oob="true">
-  <span class="reply-banner-text" id="reply-banner-text"></span>
-  <button type="button" class="reply-cancel-btn" id="reply-cancel-btn" aria-label="Prekliči odgovor">✕</button>
-</div>"#,
+{reply_clear}"#,
         max_message_length = MAX_MESSAGE_LENGTH,
+        reply_clear = super::reply::render_reply_clear_oob(),
     )
 }
 
@@ -569,62 +583,4 @@ fn render_message_status(kind: &str, message: &str) -> String {
         html_escape(kind),
         html_escape(message)
     )
-}
-
-//za reply potem potrebno prestaviti
-pub struct ReplyPreview {
-    sender_name: String,
-    content: String,
-}
-
-pub async fn reply_previews_for_messages(
-    db: &DatabaseConnection,
-    messages: &[message::Model],
-) -> Result<HashMap<i32, ReplyPreview>, AppError> {
-    let reply_ids: Vec<i32> = messages.iter().filter_map(|m| m.reply_to_id).collect();
-    if reply_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let targets = Message::find()
-        .filter(message::Column::Id.is_in(reply_ids))
-        .all(db)
-        .await?;
-
-    let sender_ids: Vec<i64> = targets.iter().filter_map(|t| t.sender_id).collect();
-    let clients = Client::find()
-        .filter(client::Column::Id.is_in(sender_ids))
-        .all(db)
-        .await?;
-    let sender_map: HashMap<i64, String> = clients
-        .into_iter()
-        .map(|c| (c.id as i64, c.username))
-        .collect();
-
-    Ok(targets
-        .into_iter()
-        .map(|t| {
-            let sender_name = t
-                .sender_id
-                .and_then(|id| sender_map.get(&id).cloned())
-                .unwrap_or_else(|| "neznan uporabnik".to_string());
-            (
-                t.id,
-                ReplyPreview {
-                    sender_name,
-                    content: t.content,
-                },
-            )
-        })
-        .collect())
-}
-
-fn truncate_preview(content: &str) -> String {
-    const MAX_PREVIEW_LENGTH: usize = 60;
-    if content.chars().count() <= MAX_PREVIEW_LENGTH {
-        content.to_string()
-    } else {
-        let truncated: String = content.chars().take(MAX_PREVIEW_LENGTH).collect();
-        format!("{}…", truncated)
-    }
 }

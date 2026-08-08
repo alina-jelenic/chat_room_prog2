@@ -23,7 +23,12 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │   │   ├── mod.rs               # deklaracija podmodulov
 │   │   ├── auth.rs              # JWT, seje, avtentikacijski middleware
 │   │   ├── forms.rs             # obdelava prijave in registracije
-│   │   ├── rooms.rs             # logika sob: ustvarjanje, pridružitev, sporočila
+│   │   ├── rooms.rs             # logika sob: ustvarjanje, pridružitev, dostop
+│   │   ├── rooms/
+│   │   │   ├── messages.rs        # zgodovina, iskanje, brisanje sporočil
+│   │   │   ├── reactions.rs       # emoji reakcije na sporočila
+│   │   │   ├── reply.rs           # nastavljanje/čiščenje odgovora (threads) 
+│   │   │   └── views.rs           # skupni HTML delci (soba, člani, obvestila)
 │   │   ├── tipi.rs              # deljeno stanje strežnika (SharedState)
 │   │   └── web.rs               # axum router, WebSocket handler
 │   └── entities/                # SeaORM modeli (client, soba, message, room_member)
@@ -47,7 +52,9 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 - **tokio** — asinhrono izvajanje
 - **jsonwebtoken** — seje prek JWT
 - **argon2** — varno zgoščevanje gesel
-- **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta
+- **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta;
+  vključno z reakcijami na sporočila in odgovori (threads), ki so v
+  celoti implementirani prek `hx-swap-oob` fragmentov s strežnika
 
 ## Zagon projekta
 
@@ -129,6 +136,10 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
   `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
   (50 na stran), starejša sporočila se naložijo na zahtevo. 
+- **Odgovori na sporočila (threads)**: zraven vsakega sporočila je gumb
+  "Odgovori", ki  prikaže banner nad vnosnim poljem s citatom sporočila, 
+  na katerega odgovarjaš. Poslan odgovor v pogovoru prikaže kratek citat 
+  izvirnega sporočila in avtorja.
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).
@@ -136,10 +147,12 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 
 ## Testiranje
 
-Integracijski testi (`tests/integration.rs`) pokrivajo avtentikacijo,
-upravljanje sob in članstva, straničenje sporočil ter WebSocket komunikacijo
-(vključno z zavračanjem nepooblaščenih povezav in obveščanjem uporabnikov
-ob izbrisu sobe) in pokrivajo tudi robne primere. Zaženemo jih z ukazom:
+Integracijski testi (`tests/integration_tests.rs`) pokrivajo avtentikacijo,
+upravljanje sob in članstva, straničenje in iskanje po sporočilih, reakcije
+na sporočila, odgovore na sporočila (threads) ter WebSocket komunikacijo
+(vključno z zavračanjem nepooblaščenih povezav, omejevanjem hitrosti
+pošiljanja in obveščanjem uporabnikov ob izbrisu sobe) in pokrivajo tudi
+robne primere. Zaženemo jih z ukazom:
  
 ```sh
 cargo test --all

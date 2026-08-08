@@ -120,6 +120,11 @@ pub fn build_router(state: SharedState) -> Router {
         )
         .route("/rooms/{name}", axum::routing::delete(rooms::delete_room))
         .route("/rooms/join", post(rooms::join_room))
+        .route(
+            "/rooms/{name}/reply/{message_id}",
+            get(rooms::reply::set_reply_target),
+        )
+        .route("/reply/clear", get(rooms::reply::clear_reply_target))
         .fallback_service(ServeDir::new("static"))
         .with_state(state)
 }
