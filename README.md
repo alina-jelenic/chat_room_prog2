@@ -27,7 +27,7 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │   │   ├── rooms/
 │   │   │   ├── messages.rs        # zgodovina, iskanje, brisanje sporočil
 │   │   │   ├── reactions.rs       # emoji reakcije na sporočila
-│   │   │   ├── reply.rs           # nastavljanje/čiščenje odgovora (threads) 
+│   │   │   ├── reply.rs           # nastavljanje/čiščenje odgovora 
 │   │   │   └── views.rs           # skupni HTML delci (soba, člani, obvestila)
 │   │   ├── tipi.rs              # deljeno stanje strežnika (SharedState)
 │   │   ├── util.rs              # skupni modul za html_escape
@@ -86,14 +86,14 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 - **jsonwebtoken** — seje prek JWT
 - **argon2** — varno zgoščevanje gesel
 - **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta;
-  vključno z reakcijami na sporočila in odgovori (threads), ki so v
+  vključno z reakcijami na sporočila in odgovori s citatom, ki so v
   celoti implementirani prek `hx-swap-oob` fragmentov s strežnika
 
 **Opomba:** V kodi je uporabljeno malo JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX. 
 
 ## Zagon projekta
 
-Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (Za ostale računalnike oz. uporabnike je po uspostavitvi strežnika potreben le dostop do interneta). Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
+Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (Za ostale računalnike oz. uporabnike je po vzpostavitvi strežnika potreben le dostop do interneta). Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
 
 1. Kopiraj .env.example v .env.
 2. V datoteki `.env` obvezno zamenjaj vrednost `JWT_SECRET=CHANGE_ME`
@@ -104,6 +104,7 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 
    ```env
    JWT_SECRET=tukaj-vstavi-dolgo-nakljucno-skrivnost-z-vsaj-32-znaki
+   ```
 3. Zaženi aplikacijo:
 ```sh
    cargo run
@@ -179,7 +180,7 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
   `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
   (50 na stran), starejša sporočila se naložijo na zahtevo. 
-- **Odgovori na sporočila **: zraven vsakega sporočila je gumb
+- **Odgovori na sporočila**: zraven vsakega sporočila je gumb
   "Odgovori", ki  da možnost, da odgovoriš na določeno sporočilo. Pri tem se
   nad tem sporočilom prikaže trak, tako da se ve kateremu sporočilu si dal
   odgovor.
