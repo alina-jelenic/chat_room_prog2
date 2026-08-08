@@ -1,6 +1,6 @@
 use crate::controller::tipi::SharedState;
-use crate::controller::web::AppError;
 use crate::controller::util::html_escape;
+use crate::controller::web::AppError;
 use axum::{
     extract::State,
     http::StatusCode,

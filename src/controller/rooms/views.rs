@@ -4,11 +4,11 @@ use super::messages::{MAX_MESSAGE_LENGTH, MAX_SEARCH_LENGTH};
 use super::room_for_websocket;
 use crate::controller::auth::AuthUser;
 use crate::controller::tipi::{RoomAccessRevokedReason, SharedState};
+use crate::controller::util::html_escape;
 use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, RoomMember, Soba};
 use crate::entities::{client, room_member, soba};
 use axum::response::{Html, IntoResponse, Response};
-use crate::controller::util::html_escape;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 pub(super) async fn render_room_list(
     db: &DatabaseConnection,
