@@ -1,5 +1,6 @@
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
+use crate::controller::util::html_escape;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -128,7 +129,8 @@ fn render_user_pill(username: &str) -> String {
 pub fn validate_jwt_secret(secret: &str) -> Result<(), AppError> {
     if secret.trim().len() < 32 {
         return Err(AppError(
-            "JWT_SECRET mora biti dolg vsaj 32 znakov.".to_string(),
+            "JWT_SECRET moraš v datoteki .env zamenjati z naključno skrivnostjo, dolgo vsaj 32 znakov."
+            .to_string(),
         ));
     }
 
@@ -140,15 +142,6 @@ fn now_as_usize() -> Result<usize, AppError> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as usize)
         .map_err(|_| AppError("Sistemski čas ni veljaven.".to_string()))
-}
-
-fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
 }
 
 pub fn unauthorized_response() -> Response {

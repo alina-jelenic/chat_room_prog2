@@ -8,6 +8,7 @@ use crate::controller::web::AppError;
 use crate::entities::prelude::{Client, RoomMember, Soba};
 use crate::entities::{client, room_member, soba};
 use axum::response::{Html, IntoResponse, Response};
+use crate::controller::util::html_escape;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 pub(super) async fn render_room_list(
     db: &DatabaseConnection,
@@ -362,13 +363,4 @@ fn render_room_button(room: &soba::Model, active: bool) -> String {
         name = name,
         pressed = pressed,
     )
-}
-
-pub(super) fn html_escape(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
 }

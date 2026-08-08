@@ -30,6 +30,7 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │   │   │   ├── reply.rs           # nastavljanje/čiščenje odgovora (threads) 
 │   │   │   └── views.rs           # skupni HTML delci (soba, člani, obvestila)
 │   │   ├── tipi.rs              # deljeno stanje strežnika (SharedState)
+│   │   ├── util.rs              # skupni modul za html_escape
 │   │   └── web.rs               # axum router, WebSocket handler
 │   └── entities/                # SeaORM modeli (client, soba, message, room_member)
 ├── migration/                 # ločen paket z migracijami (sea-orm-migration)
@@ -41,7 +42,40 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 ├── static/                    # statične HTML/CSS datoteke frontenda
 │   ├── index.html                # glavni vmesnik klepetalnice
 │   └── authorisation.html         # prijava in registracija
-├── tests/                    # testi za preverdbo delovanja
+├── tests/
+│   ├── integration_tests.rs          # vstopna datoteka, ki poveže vse module integracijskih testov
+│   ├── common/
+│   │   └── mod.rs                    # skupne testne funkcije: priprava baze, aplikacije, sej in WebSocket povezav
+│   ├── authorisation/
+│   │   ├── mod.rs                    # deklaracija testnih modulov za avtentikacijo
+│   │   ├── jwt.rs                    # testi podpisa, veljavnosti, poteka in skrivnosti JWT
+│   │   ├── registration.rs           # testi registracije, validacije in unikatnosti uporabniških imen
+│   │   └── sessions.rs               # testi prijave, piškotka seje, zaščitenih poti, /me in odjave
+│   ├── frontend/
+│   │   ├── mod.rs                    # deklaracija testnega modula za frontend
+│   │   └── frontend_test.rs          # testi glavnega uporabniškega toka in prikaza stanja WebSocket povezave
+│   ├── messages/
+│   │   ├── mod.rs                    # deklaracija testnih modulov za sporočila
+│   │   ├── deletion.rs               # testi avtorizacije, brisanja in realnočasovnega obveščanja
+│   │   ├── history.rs                # testi straničenja, vrstnega reda, HTML escaping-a in obstojnosti sporočil
+│   │   ├── reactions.rs              # testi dodajanja, odstranjevanja in oddajanja reakcij
+│   │   ├── reply.rs                  # testi odgovorov s citatom in preverjanja izvirne sobe
+│   │   └── search.rs                 # testi iskanja, omejevanja na sobo, dostopa in HTML escaping-a
+│   ├── migrations/
+│   │   ├── mod.rs                    # deklaracija testnega modula za migracije
+│   │   └── migrations_test.rs        # testi idempotentnosti migracij in ohranjanja podatkov stare baze
+│   ├── rooms/
+│   │   ├── mod.rs                    # deklaracija testnih modulov za sobe
+│   │   ├── creation.rs               # testi validacije, podvojenih imen in sočasnega ustvarjanja sob
+│   │   ├── deletion.rs               # testi brisanja sobe, obveščanja uporabnikov in blokiranja nadaljnjih sporočil
+│   │   ├── kick.rs                   # testi lastnikovega izključevanja članov in zapiranja njihovih povezav
+│   │   └── membership.rs             # testi pridružitve, zapustitve, članstva in omejevanja dostopa
+│   └── websocket/
+│       ├── mod.rs                    # deklaracija testnih modulov za WebSocket
+│       ├── membership.rs             # testi povezav brez članstva ter zapiranja aktivnih in pasivnih povezav
+│       ├── messaging.rs              # testi shranjevanja in oddajanja sporočil več povezanim uporabnikom
+│       ├── rate_limit.rs             # testi skupne omejitve hitrosti med več povezavami uporabnika
+│       └── sessions.rs               # testi zavračanja WebSocket povezav brez veljavne seje
 └── .github/workflows/ci.yml    # CI: fmt, clippy, testi
 ```
 ## Uporabljeni paketi
@@ -61,15 +95,23 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 
 Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (Za ostale računalnike oz. uporabnike je po uspostavitvi strežnika potreben le dostop do interneta). Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
 
-1. Kopiraj .env.example v .env in po potrebi prilagodi vrednosti (predvsem JWT_SECRET, ki mora biti dolg vsaj 32 znakov).
-2. Zaženi aplikacijo:
+1. Kopiraj .env.example v .env.
+2. V datoteki `.env` obvezno zamenjaj vrednost `JWT_SECRET=CHANGE_ME`
+   z naključno skrivnostjo, dolgo vsaj 32 znakov. Datoteke `.env` ne
+   dodajaj v Git, saj vsebuje lokalno skrivnost.
+
+   Primer:
+
+   ```env
+   JWT_SECRET=tukaj-vstavi-dolgo-nakljucno-skrivnost-z-vsaj-32-znaki
+3. Zaženi aplikacijo:
 ```sh
    cargo run
 ```
    Ob zagonu se samodejno izvedejo vse manjkajoče migracije in ustvari
    soba `#general`, če še ne obstaja.
 
-3. Odloči se, kako bodo odjemalci dostopali do strežnika, in ustrezno
+4. Odloči se, kako bodo odjemalci dostopali do strežnika, in ustrezno
    nastavi `SERVER_ADDR` v `.env`.
 
     ### a) Samo na istem računalniku
@@ -109,7 +151,7 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 
       Za druge distribucije glej [uradno stran za prenos](https://developers.cloudflare.com/tunnel/downloads/).
 
-   2. Zaženi aplikacijo lokalno (`cargo run`, glej korak 2 zgoraj).
+   2. Zaženi aplikacijo lokalno (`cargo run`, glej korak 3 zgoraj).
    3. V ločenem terminalu zaženi:
     ```sh
       cloudflared tunnel --url http://localhost:3000
@@ -131,8 +173,8 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 - **Klepetalne sobe**: soba `#general` je na voljo vsem, dodatne sobe pa
   lahko uporabniki ustvarijo (postanejo njihov lastnik) ali se jim
   pridružijo prek numeričnega ID-ja sobe.
-- **Upravljanje članstva**: pridružitev, zapustitev sobe in brisanje sobe
-  (samo lastnik), z ustreznimi omejitvami dostopa do zasebnih sob.
+- **Upravljanje članstva**: pridružitev in zapustitev sobe ter pregled in
+  izključevanje članov s strani lastnika. Sobo lahko izbriše samo njen lastnik.
 - **Sporočila v realnem času** prek WebSocket povezave in HTMX (`ws-send`,
   `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
@@ -144,21 +186,27 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).
-
+- **Iskanje po zgodovini** z omejitvijo rezultatov na trenutno sobo.
+- **Brisanje lastnih sporočil**, pri katerem se sprememba v realnem času
+  prikaže vsem povezanim uporabnikom.
+- **Reakcije na sporočila**, ki jih lahko uporabniki dodajo ali odstranijo.
+- **Omejevanje hitrosti pošiljanja**, skupno vsem povezavam istega uporabnika.
 
 ## Testiranje
 
-Integracijski testi (`tests/integration_tests.rs`) pokrivajo avtentikacijo,
-upravljanje sob in članstva, straničenje in iskanje po sporočilih, reakcije
-na sporočila, odgovore na sporočila (threads) ter WebSocket komunikacijo
-(vključno z zavračanjem nepooblaščenih povezav, omejevanjem hitrosti
-pošiljanja in obveščanjem uporabnikov ob izbrisu sobe) in pokrivajo tudi
-robne primere. Zaženemo jih z ukazom:
- 
+Integracijski testi, povezani prek `tests/integration_tests.rs`, pokrivajo:
+
+- registracijo, prijavo, JWT in sejne piškotke;
+- ustvarjanje, članstvo, zapustitev in brisanje sob;
+- straničenje, iskanje, odgovore, reakcije in brisanje sporočil;
+- WebSocket komunikacijo več uporabnikov;
+- zavračanje nepooblaščenih povezav;
+- omejevanje hitrosti pošiljanja;
+- zapiranje povezav po zapustitvi, izključitvi ali izbrisu sobe;
+- migracije in ohranjanje podatkov stare baze.
+
+Vse teste zaženemo z:
+
 ```sh
-cargo test --all
+cargo test --workspace --all-targets --locked
 ```
- 
-
-
-

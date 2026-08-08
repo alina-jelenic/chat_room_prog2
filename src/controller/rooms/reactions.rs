@@ -1,6 +1,6 @@
 //! Shranjevanje, seštevanje in HTML-prikaz reakcij na sporočila.
 
-use super::views::html_escape;
+use crate::controller::util::html_escape;
 use crate::controller::web::AppError;
 use crate::entities::prelude::{Message, MessageReactions};
 use crate::entities::{message, message_reactions};

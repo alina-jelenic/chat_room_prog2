@@ -4,7 +4,8 @@ use super::reactions::{
     reaction_counts_for_messages, render_quick_reaction_buttons, render_reaction_add_form,
     render_reaction_oznaka,
 };
-use super::views::{broadcast_room_html, html_escape};
+use super::views::broadcast_room_html;
+use crate::controller::util::html_escape;
 use super::{authenticated_user, db_from_state, room_for_websocket, user_can_access_room};
 use crate::controller::auth::AuthUser;
 use crate::controller::rooms::reply::{

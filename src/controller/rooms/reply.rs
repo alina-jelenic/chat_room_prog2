@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::views::html_escape;
+use crate::controller::util::html_escape;
 use super::{authenticated_user, db_from_state, room_for_websocket, user_can_access_room};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
