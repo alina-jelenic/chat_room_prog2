@@ -155,12 +155,6 @@ pub async fn create_websocket_message(
     }
     validate_message_content(content)?;
 
-    let room_still_exists = Soba::find_by_id(room_id).one(db).await?.is_some();
-    if !room_still_exists {
-        // Soba je bila med tem, ko je uporabnik tipkal, že izbrisana.
-        // Sporočila ne shranimo — vrnemo prazen niz, enako kot pri praznem sporočilu.
-        return Ok(String::new());
-    }
     let room = match Soba::find_by_id(room_id).one(db).await? {
         Some(room) => room,
         None => return Ok(String::new()),

@@ -1,5 +1,6 @@
 use crate::common::{body_text, form_request, register_and_login, test_app};
 
+use axum::http::StatusCode;
 use chat_room_prog2::{
     controller::forms::normalize_username,
     entities::{client, prelude::Client},
@@ -72,4 +73,32 @@ fn username_rules_are_deterministic() {
     assert!(normalize_username("ime s presledkom").is_err());
     assert!(normalize_username("<script>").is_err());
     assert!(normalize_username(&"a".repeat(25)).is_err());
+}
+
+#[tokio::test]
+async fn concurrent_registration_with_same_username_only_creates_one_account() {
+    let (app, db) = test_app().await;
+    let body = "username=dirka&password=skrivnost1&confirm=skrivnost1";
+
+    let (response_a, response_b) = tokio::join!(
+        app.clone()
+            .oneshot(form_request("POST", "/api/register", body, None)),
+        app.clone()
+            .oneshot(form_request("POST", "/api/register", body, None)),
+    );
+    let response_a = response_a.unwrap();
+    let response_b = response_b.unwrap();
+
+    assert_eq!(response_a.status(), StatusCode::OK);
+    assert_eq!(response_b.status(), StatusCode::OK); // ne 500!
+
+    let text_a = body_text(response_a).await;
+    let text_b = body_text(response_b).await;
+    let successes = [&text_a, &text_b]
+        .into_iter()
+        .filter(|t| t.contains("Račun je ustvarjen"))
+        .count();
+    assert_eq!(successes, 1);
+
+    assert_eq!(Client::find().count(&db).await.unwrap(), 1);
 }

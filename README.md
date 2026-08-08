@@ -41,8 +41,7 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 ├── static/                    # statične HTML/CSS datoteke frontenda
 │   ├── index.html                # glavni vmesnik klepetalnice
 │   └── authorisation.html         # prijava in registracija
-├── tests/
-│   └── integration.rs            # integracijski testi (HTTP + WebSocket)
+├── tests/                    # testi za preverdbo delovanja
 └── .github/workflows/ci.yml    # CI: fmt, clippy, testi
 ```
 ## Uporabljeni paketi
@@ -55,6 +54,8 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 - **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta;
   vključno z reakcijami na sporočila in odgovori (threads), ki so v
   celoti implementirani prek `hx-swap-oob` fragmentov s strežnika
+
+**Opomba:** V kodi je uporabljeno malo JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX. 
 
 ## Zagon projekta
 
@@ -136,10 +137,10 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
   `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
   (50 na stran), starejša sporočila se naložijo na zahtevo. 
-- **Odgovori na sporočila (threads)**: zraven vsakega sporočila je gumb
-  "Odgovori", ki  prikaže banner nad vnosnim poljem s citatom sporočila, 
-  na katerega odgovarjaš. Poslan odgovor v pogovoru prikaže kratek citat 
-  izvirnega sporočila in avtorja.
+- **Odgovori na sporočila **: zraven vsakega sporočila je gumb
+  "Odgovori", ki  da možnost, da odgovoriš na določeno sporočilo. Pri tem se
+  nad tem sporočilom prikaže trak, tako da se ve kateremu sporočilu si dal
+  odgovor.
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).

@@ -57,6 +57,10 @@ impl From<&str> for AppError {
     }
 }
 
+pub fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    err.to_string().contains("UNIQUE constraint failed")
+}
+
 #[derive(Debug, Deserialize)]
 struct WsQuery {
     room_name: Option<String>,

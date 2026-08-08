@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::controller::auth::{create_jwt, session_cookie};
 use crate::controller::tipi::SharedState;
 use crate::controller::web::AppError;
+use crate::controller::web::is_unique_violation;
 use crate::entities::{client, prelude::Client};
 use argon2::{
     Argon2,
@@ -145,13 +146,24 @@ pub async fn register_handler(
     // Naključna sol omogoča varno uporabo enakih gesel pri različnih uporabnikih.
     let hashed = hash_password(&form.password).map_err(AppError)?;
 
-    client::ActiveModel {
+    let insert_result = client::ActiveModel {
         username: Set(username),
         geslo: Set(hashed),
         ..Default::default()
     }
     .insert(&db)
-    .await?;
+    .await;
+
+    if let Err(e) = insert_result {
+        return if is_unique_violation(&e) {
+            Ok(Html(
+                r#"<div id="register-msg" class="server-msg error">Uporabniško ime je že zasedeno.</div>"#
+                    .to_string(),
+            ))
+        } else {
+            Err(e.into())
+        };
+    }
 
     Ok(Html(
         r#"<div id="register-msg" class="server-msg"></div>

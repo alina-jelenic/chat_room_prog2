@@ -4,6 +4,7 @@
 use crate::controller::auth::{AuthUser, require_auth};
 use crate::controller::tipi::{RoomAccessRevokedReason, SharedState};
 use crate::controller::web::AppError;
+use crate::controller::web::is_unique_violation;
 use crate::entities::prelude::{Message, RoomMember, Soba};
 use crate::entities::{message, room_member, soba};
 use axum::{
@@ -94,9 +95,6 @@ pub async fn room_for_websocket(
         .filter(soba::Column::Name.eq(clean_name))
         .one(db)
         .await?)
-}
-fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    err.to_string().contains("UNIQUE constraint failed")
 }
 
 const MAX_ID_ATTEMPTS: u32 = 5;
