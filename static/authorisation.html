@@ -122,6 +122,47 @@
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline; }
     .htmx-request .btn-label       { display: none; }
+
+      /* ── MOBILNI PRIKAZ ── */
+    @media (max-width: 700px) {
+      body {
+        min-height: 100dvh;
+        padding: 16px;
+        overflow-y: auto;
+      }
+
+      .card {
+        max-width: 420px;
+        padding: 32px 22px 24px;
+        border-radius: 12px;
+      }
+
+      .tagline {
+        margin-bottom: 24px;
+      }
+
+      .tab-bar {
+        margin-bottom: 18px;
+      }
+
+      .tab-label {
+        padding: 10px 8px;
+        font-size: .82rem;
+      }
+
+      .field {
+        margin-bottom: 14px;
+      }
+
+      input[type="text"],
+      input[type="password"] {
+        font-size: 16px;
+      }
+
+      .btn {
+        min-height: 44px;
+      }
+    }
   </style>
 </head>
 <body>
