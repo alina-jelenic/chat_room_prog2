@@ -46,7 +46,7 @@ pub async fn set_reply_target(
     };
 
     let sender_name = match target.sender_id {
-        Some(id) => Client::find_by_id(id)
+        Some(id) => Client::find_by_id(id as i32)
             .one(&db)
             .await?
             .map(|c| c.username)
@@ -114,8 +114,10 @@ pub async fn reply_previews_for_messages(
         .filter(client::Column::Id.is_in(sender_ids))
         .all(db)
         .await?;
-    let sender_map: HashMap<i64, String> =
-        clients.into_iter().map(|c| (c.id, c.username)).collect();
+    let sender_map: HashMap<i64, String> = clients
+        .into_iter()
+        .map(|c| (c.id as i64, c.username))
+        .collect();
 
     Ok(targets
         .into_iter()

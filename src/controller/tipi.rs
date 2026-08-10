@@ -19,7 +19,7 @@ pub enum RoomAccessRevokedReason {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoomAccessRevoked {
     pub room_id: i32,
-    pub user_id: i64,
+    pub user_id: i32,
     pub reason: RoomAccessRevokedReason,
 }
 
@@ -28,7 +28,7 @@ pub struct ServerState {
     pub db: DatabaseConnection,
     pub jwt_secret: String,
     room_access_revoked_tx: broadcast::Sender<RoomAccessRevoked>,
-    last_message_at: HashMap<i64, Instant>,
+    last_message_at: HashMap<i32, Instant>,
 }
 
 impl ServerState {
@@ -46,7 +46,7 @@ impl ServerState {
         self.room_access_revoked_tx.subscribe()
     }
 
-    pub fn revoke_room_access(&self, room_id: i32, user_id: i64, reason: RoomAccessRevokedReason) {
+    pub fn revoke_room_access(&self, room_id: i32, user_id: i32, reason: RoomAccessRevokedReason) {
         let _ = self.room_access_revoked_tx.send(RoomAccessRevoked {
             room_id,
             user_id,
@@ -57,7 +57,7 @@ impl ServerState {
     /// Rezervira naslednje pošiljanje. `false` pomeni, da uporabnikov prejšnji
     /// zapis še ni dovolj star. Ker se preverba izvede pod skupnim kratkim
     /// mutexom, omejitve ni mogoče obiti z drugim zavihkom ali drugo sobo.
-    pub fn reserve_message_send(&mut self, user_id: i64) -> bool {
+    pub fn reserve_message_send(&mut self, user_id: i32) -> bool {
         let now = Instant::now();
         if self
             .last_message_at

@@ -8,7 +8,6 @@ use chat_room_prog2::entities::{
     prelude::{Client, MessageReactions, Soba},
     soba,
 };
-use chat_room_prog2::migration::*;
 use futures_util::SinkExt;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use tokio::time::{Duration, timeout};
@@ -18,8 +17,6 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
     let (app, db) = test_app().await;
-    Migrator::up(&db, None).await.unwrap();
-
     let sender_cookie = register_and_login(&app, "alina").await;
     let other_cookie = register_and_login(&app, "jovan").await;
     let sender = Client::find()

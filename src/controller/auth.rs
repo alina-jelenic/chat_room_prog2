@@ -17,18 +17,18 @@ const SESSION_DURATION_SECONDS: usize = 60 * 60 * 24; // 24 ur
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: i64,
+    pub sub: i32,
     pub username: String,
     pub exp: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    pub id: i64,
+    pub id: i32,
     pub username: String,
 }
 
-pub fn create_jwt(user_id: i64, username: &str, secret: &str) -> Result<String, AppError> {
+pub fn create_jwt(user_id: i32, username: &str, secret: &str) -> Result<String, AppError> {
     validate_jwt_secret(secret)?;
     let now = now_as_usize()?;
     let claims = Claims {
