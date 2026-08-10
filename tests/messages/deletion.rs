@@ -38,7 +38,7 @@ async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
         .unwrap()
         .unwrap();
     let stored_message = message::ActiveModel {
-        sender_id: Set(Some(sender.id as i64)),
+        sender_id: Set(Some(sender.id)),
         content: Set("sporočilo za izbris".to_string()),
         timestamp: Set(1),
         soba_id: Set(room.id),

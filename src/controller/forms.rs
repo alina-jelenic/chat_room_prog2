@@ -86,7 +86,9 @@ pub async fn login_handler(
     match user {
         None => Ok(invalid_login_response()),
         Some(u) => {
-            let ok = verify_password(&form.password, &u.geslo).map_err(AppError)?;
+            let ok = verify_password_async(form.password, u.geslo.clone())
+                .await
+                .map_err(AppError)?;
             if ok {
                 let token = create_jwt(u.id, &u.username, &jwt_secret)?;
                 let jar = jar.add(session_cookie(token));
@@ -144,7 +146,9 @@ pub async fn register_handler(
 
     // Geslo zgoščujemo, da ga v bazi ne hranimo v čisti obliki.
     // Naključna sol omogoča varno uporabo enakih gesel pri različnih uporabnikih.
-    let hashed = hash_password(&form.password).map_err(AppError)?;
+    let hashed = hash_password_async(form.password)
+        .await
+        .map_err(AppError)?;
 
     let insert_result = client::ActiveModel {
         username: Set(username),
@@ -203,6 +207,18 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+async fn hash_password_async(password: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|error| format!("Argon2 opravilo se ni uspešno zaključilo: {error}"))?
+}
+
+async fn verify_password_async(password: String, hash: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
+        .await
+        .map_err(|error| format!("Argon2 opravilo se ni uspešno zaključilo: {error}"))?
 }
 
 /// Administratorsko ponastavi samo račun iz stare baze, ki še nima veljavnega

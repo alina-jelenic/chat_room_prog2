@@ -142,3 +142,8 @@ pub(super) fn render_reaction_add_form(message_id: i32) -> String {
         id = message_id,
     )
 }
+
+pub fn render_reaction_rate_limit_warning() -> String {
+    r#"<div id="message-status" class="message-status warning" role="alert" aria-live="assertive" hx-swap-oob="true">Reakcije dodajaš prehitro. Počakaj trenutek in poskusi znova.</div>"#
+        .to_string()
+}

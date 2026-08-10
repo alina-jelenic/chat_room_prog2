@@ -71,7 +71,7 @@ async fn registration_login_room_panel_and_deletion_work_together() {
         .unwrap()
         .unwrap();
     message::ActiveModel {
-        sender_id: Set(Some(user.id as i64)),
+        sender_id: Set(Some(user.id)),
         content: Set("za brisanje".to_string()),
         timestamp: Set(1),
         soba_id: Set(room.id),
@@ -107,4 +107,20 @@ async fn registration_login_room_panel_and_deletion_work_together() {
             .is_none()
     );
     assert_eq!(message::Entity::find().count(&db).await.unwrap(), 0);
+}
+
+#[test]
+fn frontend_loads_htmx_from_local_files() {
+    let index = include_str!("../../static/index.html");
+    let authorisation = include_str!("../../static/authorisation.html");
+
+    assert!(index.contains(r#"src="/vendor/htmx.min.js""#));
+    assert!(index.contains(r#"src="/vendor/ws.js""#));
+    assert!(authorisation.contains(r#"src="/vendor/htmx.min.js""#));
+
+    assert!(!index.contains("unpkg.com/htmx"));
+    assert!(!authorisation.contains("unpkg.com/htmx"));
+
+    assert!(!include_bytes!("../../static/vendor/htmx.min.js").is_empty());
+    assert!(!include_bytes!("../../static/vendor/ws.js").is_empty());
 }

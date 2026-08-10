@@ -9,6 +9,7 @@ pub type SharedState = Arc<Mutex<ServerState>>;
 /// En uporabnik lahko pošlje največ eno sporočilo v tem časovnem razmiku.
 /// Omejitev je skupna vsem njegovim zavihkom, povezavam in sobam.
 pub const MESSAGE_COOLDOWN: Duration = Duration::from_millis(750);
+pub const REACTION_COOLDOWN: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoomAccessRevokedReason {
@@ -29,6 +30,7 @@ pub struct ServerState {
     pub jwt_secret: String,
     room_access_revoked_tx: broadcast::Sender<RoomAccessRevoked>,
     last_message_at: HashMap<i64, Instant>,
+    last_reaction_at: HashMap<i64, Instant>,
 }
 
 impl ServerState {
@@ -58,16 +60,36 @@ impl ServerState {
     /// zapis še ni dovolj star. Ker se preverba izvede pod skupnim kratkim
     /// mutexom, omejitve ni mogoče obiti z drugim zavihkom ali drugo sobo.
     pub fn reserve_message_send(&mut self, user_id: i64) -> bool {
+        Self::reserve_action(
+            &mut self.last_message_at,
+            user_id,
+            MESSAGE_COOLDOWN,
+        )
+    }
+
+    pub fn reserve_reaction(&mut self, user_id: i64) -> bool {
+        Self::reserve_action(
+            &mut self.last_reaction_at,
+            user_id,
+            REACTION_COOLDOWN,
+        )
+    }
+
+    fn reserve_action(
+        last_action_at: &mut HashMap<i64, Instant>,
+        user_id: i64,
+        cooldown: Duration,
+    ) -> bool {
         let now = Instant::now();
-        if self
-            .last_message_at
+
+        if last_action_at
             .get(&user_id)
-            .is_some_and(|last| now.saturating_duration_since(*last) < MESSAGE_COOLDOWN)
+            .is_some_and(|last| now.saturating_duration_since(*last) < cooldown)
         {
             return false;
         }
 
-        self.last_message_at.insert(user_id, now);
+        last_action_at.insert(user_id, now);
         true
     }
 
@@ -80,6 +102,7 @@ impl ServerState {
             jwt_secret,
             room_access_revoked_tx,
             last_message_at: HashMap::new(),
+            last_reaction_at: HashMap::new(),
         }))
     }
 }

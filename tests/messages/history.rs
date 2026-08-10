@@ -44,7 +44,7 @@ async fn message_history_is_paginated_ordered_and_html_escaped() {
 
     for number in 1..=55 {
         message::ActiveModel {
-            sender_id: Set(Some(user.id as i64)),
+            sender_id: Set(Some(user.id)),
             content: Set(format!("msg-{number:03}")),
             timestamp: Set(number as i64),
             soba_id: Set(room.id),
@@ -55,7 +55,7 @@ async fn message_history_is_paginated_ordered_and_html_escaped() {
         .unwrap();
     }
     message::ActiveModel {
-        sender_id: Set(Some(user.id as i64)),
+        sender_id: Set(Some(user.id)),
         content: Set("<script>alert('x')</script>&".to_string()),
         timestamp: Set(56),
         soba_id: Set(room.id),

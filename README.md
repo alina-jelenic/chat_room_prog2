@@ -39,7 +39,10 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │   │   ├── lib.rs                 # seznam vseh migracij
 │   │   └── m*.rs                   # posamezne migracijske datoteke
 │   └── README.md                 # navodila za uporabo migracijskega CLI-ja
-├── static/                    # statične HTML/CSS datoteke frontenda
+├── static/   
+│   ├── vendor/                 
+│   │   ├── htmx.min.js                # lokalna knjižnica HTMX 2.0.10
+│   │   └── ws.js                      # lokalna HTMX WebSocket razširitev 2.0.4
 │   ├── index.html                # glavni vmesnik klepetalnice
 │   └── authorisation.html         # prijava in registracija
 ├── tests/
@@ -85,11 +88,9 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 - **tokio** — asinhrono izvajanje
 - **jsonwebtoken** — seje prek JWT
 - **argon2** — varno zgoščevanje gesel
-- **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta;
-  vključno z reakcijami na sporočila in odgovori s citatom, ki so v
-  celoti implementirani prek `hx-swap-oob` fragmentov s strežnika
+- **HTMX 2.0.10 in htmx-ext-ws 2.0.4** — knjižnici sta shranjeni lokalno v static/vendor, zato delovanje aplikacije ni odvisno od razpoložljivosti zunanjega CDN-ja.
 
-**Opomba:** V kodi je uporabljeno malo JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX. 
+**Opomba:** V kodi je uporabljeno malo lastnega JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX. 
 
 ## Zagon projekta
 
@@ -105,7 +106,9 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
    ```env
    JWT_SECRET=tukaj-vstavi-dolgo-nakljucno-skrivnost-z-vsaj-32-znaki
    ```
-3. Zaženi aplikacijo:
+3. Vse ukaze za zagon izvajamo iz korenske mape repozitorija. Strežnik statične datoteke nalaga iz relativne poti static,
+  zato lahko zagon binarne datoteke iz drugega delovnega imenika povzroči odgovore 404.
+  Zaženi aplikacijo:
 ```sh
    cargo run
 ```
