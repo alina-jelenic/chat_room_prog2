@@ -128,7 +128,7 @@ pub async fn delete_message(
     if !user_can_access_room(&db, &room, user.id).await? {
         return Ok(StatusCode::FORBIDDEN.into_response());
     }
-    if stored_message.sender_id != Some(user.id as i64) {
+    if stored_message.sender_id != Some(user.id) {
         return Ok((
             StatusCode::FORBIDDEN,
             "Izbrišeš lahko samo svoja sporočila.",
@@ -173,7 +173,7 @@ pub async fn create_websocket_message(
         None => None,
     };
 
-    let msg = insert_message(db, room_id, Some(user.id as i64), content, reply_to_id).await?;
+    let msg = insert_message(db, room_id, Some(user.id), content, reply_to_id).await?;
     let previews = reply_previews_for_messages(db, std::slice::from_ref(&msg)).await?;
     let reply_preview = msg.reply_to_id.and_then(|id| previews.get(&id));
     Ok(render_message_oob(
@@ -225,7 +225,7 @@ async fn render_messages_page(
         .await?;
     let sender_map: HashMap<i64, String> = clients
         .into_iter()
-        .map(|client| (client.id as i64, client.username))
+        .map(|client| (client.id, client.username))
         .collect();
 
     // Bloke (ločila + sporočila) gradimo v kronološkem vrstnem redu,
@@ -334,7 +334,7 @@ async fn render_message_search_page(
         .await?;
     let sender_map = clients
         .into_iter()
-        .map(|client| (client.id as i64, client.username))
+        .map(|client| (client.id, client.username))
         .collect::<HashMap<_, _>>();
 
     let mut html = String::new();

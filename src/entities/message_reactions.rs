@@ -6,7 +6,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub message_id: i32,
-    pub client_id: i32,
+    pub client_id: i64,
     pub emoji: String,
 }
 
