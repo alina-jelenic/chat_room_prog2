@@ -110,10 +110,11 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
     .expect("lastnik ni prejel članovega pripravljalnega sporočila");
 
     // Član doda reakcijo 👍.
+    let reaction_payload =
+        format!(r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#);
+
     member_socket
-        .send(WsMessage::Text(
-            format!(r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#).into(),
-        ))
+        .send(WsMessage::Text(reaction_payload.clone().into()))
         .await
         .unwrap();
 
@@ -127,6 +128,12 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
         .await
         .expect("član ni prejel potrditve svoje reakcije");
     assert!(member_saw_reaction.contains("👍 1"));
+
+    // Takojšen drugi klik mora sprožiti omejitev hitrosti.
+    member_socket
+        .send(WsMessage::Text(reaction_payload.into()))
+        .await
+        .unwrap();
 
     assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
 
