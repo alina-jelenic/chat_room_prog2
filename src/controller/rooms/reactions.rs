@@ -11,7 +11,7 @@ const QUICK_REACTIONS: [&str; 5] = ["👍", "❤️", "😂", "😮", "😢"];
 pub async fn toggle_reaction(
     db: &DatabaseConnection,
     room_id: i32,
-    user_id: i32,
+    user_id: i64,
     message_id: i32,
     emoji: &str,
 ) -> Result<Option<String>, AppError> {

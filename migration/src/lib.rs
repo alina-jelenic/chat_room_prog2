@@ -1,6 +1,5 @@
 pub use sea_orm_migration::prelude::*;
 
-mod m20250807_000001_message_reply;
 mod m20260522_114626_soba;
 mod m20260522_114706_message;
 mod m20260522_114715_client;
@@ -10,6 +9,8 @@ mod m20260719_000001_client_username_unique;
 mod m20260726_000001_room_membership;
 mod m20260727_000001_message_soba_on_delete;
 mod m20260806_000001_message_reactions;
+mod m20260807_000001_message_reply;
+mod m20260810_000001_message_soba_id_index;
 
 pub struct Migrator;
 
@@ -26,7 +27,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260726_000001_room_membership::Migration),
             Box::new(m20260727_000001_message_soba_on_delete::Migration),
             Box::new(m20260806_000001_message_reactions::Migration),
-            Box::new(m20250807_000001_message_reply::Migration),
+            Box::new(m20260807_000001_message_reply::Migration),
+            Box::new(m20260810_000001_message_soba_id_index::Migration),
         ]
     }
 }

@@ -102,7 +102,7 @@ const MAX_ID_ATTEMPTS: u32 = 5;
 async fn ensure_room_exists(
     db: &DatabaseConnection,
     name: &str,
-    owner_id: Option<i32>,
+    owner_id: Option<i64>,
 ) -> Result<soba::Model, AppError> {
     let clean_name = normalize_room_name(name)?;
 
@@ -147,7 +147,7 @@ async fn ensure_room_exists(
     unreachable!("zanka se vedno konča z return-om na zadnjem poskusu")
 }
 
-async fn ensure_room_membership<C>(db: &C, room_id: i32, user_id: i32) -> Result<bool, AppError>
+async fn ensure_room_membership<C>(db: &C, room_id: i32, user_id: i64) -> Result<bool, AppError>
 where
     C: ConnectionTrait,
 {
@@ -173,7 +173,7 @@ where
     Ok(true)
 }
 
-async fn is_room_member<C>(db: &C, room_id: i32, user_id: i32) -> Result<bool, AppError>
+async fn is_room_member<C>(db: &C, room_id: i32, user_id: i64) -> Result<bool, AppError>
 where
     C: ConnectionTrait,
 {
@@ -188,7 +188,7 @@ where
 pub async fn user_can_access_room(
     db: &DatabaseConnection,
     room: &soba::Model,
-    user_id: i32,
+    user_id: i64,
 ) -> Result<bool, AppError> {
     if room.name == "general" {
         return Ok(true);
@@ -217,7 +217,7 @@ impl From<AppError> for RoomCreationError {
 async fn create_owned_room(
     db: &DatabaseConnection,
     name: String,
-    owner_id: i32,
+    owner_id: i64,
 ) -> Result<soba::Model, RoomCreationError> {
     use rand::Rng;
 
@@ -541,7 +541,7 @@ pub async fn list_room_members(
 pub async fn kick_room_member(
     jar: CookieJar,
     State(state): State<SharedState>,
-    Path((room_name, user_id)): Path<(String, i32)>,
+    Path((room_name, user_id)): Path<(String, i64)>,
 ) -> Result<Response, AppError> {
     let user = match authenticated_user(&jar, &state) {
         Ok(user) => user,

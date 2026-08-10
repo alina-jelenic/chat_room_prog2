@@ -12,7 +12,7 @@ use axum::response::{Html, IntoResponse, Response};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 pub(super) async fn render_room_list(
     db: &DatabaseConnection,
-    user_id: i32,
+    user_id: i64,
     active_room_name: &str,
 ) -> Result<String, AppError> {
     let mut room_ids = RoomMember::find()
@@ -317,7 +317,7 @@ pub(super) fn broadcast_room_html(
 pub(super) fn notify_room_access_revoked(
     state: &SharedState,
     room_id: i32,
-    user_id: i32,
+    user_id: i64,
     reason: RoomAccessRevokedReason,
 ) -> Result<(), AppError> {
     state
