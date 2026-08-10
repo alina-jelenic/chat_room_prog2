@@ -60,19 +60,11 @@ impl ServerState {
     /// zapis še ni dovolj star. Ker se preverba izvede pod skupnim kratkim
     /// mutexom, omejitve ni mogoče obiti z drugim zavihkom ali drugo sobo.
     pub fn reserve_message_send(&mut self, user_id: i64) -> bool {
-        Self::reserve_action(
-            &mut self.last_message_at,
-            user_id,
-            MESSAGE_COOLDOWN,
-        )
+        Self::reserve_action(&mut self.last_message_at, user_id, MESSAGE_COOLDOWN)
     }
 
     pub fn reserve_reaction(&mut self, user_id: i64) -> bool {
-        Self::reserve_action(
-            &mut self.last_reaction_at,
-            user_id,
-            REACTION_COOLDOWN,
-        )
+        Self::reserve_action(&mut self.last_reaction_at, user_id, REACTION_COOLDOWN)
     }
 
     fn reserve_action(

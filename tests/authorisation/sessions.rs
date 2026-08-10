@@ -115,8 +115,7 @@ async fn login_me_and_logout_manage_the_session_cookie() {
 
 #[tokio::test]
 async fn internal_errors_do_not_expose_details() {
-    let response =
-        AppError("SQL napaka: skrivna notranja podrobnost".to_string()).into_response();
+    let response = AppError("SQL napaka: skrivna notranja podrobnost".to_string()).into_response();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(

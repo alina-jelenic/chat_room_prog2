@@ -334,7 +334,7 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                                     Ok(mut state) => state.reserve_reaction(user.id),
                                     Err(_) => break false,
                                 };
-                                
+
                                 if !may_react {
                                     let _ = personal_tx.send(rooms::render_reaction_rate_limit_warning());
                                     continue;

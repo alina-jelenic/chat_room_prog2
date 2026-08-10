@@ -146,9 +146,7 @@ pub async fn register_handler(
 
     // Geslo zgoščujemo, da ga v bazi ne hranimo v čisti obliki.
     // Naključna sol omogoča varno uporabo enakih gesel pri različnih uporabnikih.
-    let hashed = hash_password_async(form.password)
-        .await
-        .map_err(AppError)?;
+    let hashed = hash_password_async(form.password).await.map_err(AppError)?;
 
     let insert_result = client::ActiveModel {
         username: Set(username),

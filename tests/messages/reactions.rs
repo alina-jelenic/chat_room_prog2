@@ -112,23 +112,10 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
     // Član doda reakcijo 👍.
     member_socket
         .send(WsMessage::Text(
-            format!(
-                r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#
-            )
-            .into(),
+            format!(r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#).into(),
         ))
         .await
         .unwrap();
-
-    let warning = timeout(
-        Duration::from_secs(2),
-        recv_until(&mut member_socket, "Reakcije dodajaš prehitro"),
-    )
-    .await
-    .expect("uporabnik ni prejel opozorila za prehitro reakcijo");
-
-    assert!(warning.contains("message-status"));
-    assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
 
     let owner_saw_reaction = timeout(Duration::from_secs(2), recv_until(&mut owner_socket, "👍"))
         .await
@@ -141,6 +128,16 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
         .expect("član ni prejel potrditve svoje reakcije");
     assert!(member_saw_reaction.contains("👍 1"));
 
+    assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
+
+    let warning = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "Reakcije dodajaš prehitro"),
+    )
+    .await
+    .expect("uporabnik ni prejel opozorila za prehitro reakcijo");
+
+    assert!(warning.contains("message-status"));
     assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
 
     sleep(REACTION_COOLDOWN + Duration::from_millis(50)).await;
