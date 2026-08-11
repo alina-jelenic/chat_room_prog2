@@ -137,8 +137,18 @@ pub async fn delete_message(
             .into_response());
     }
 
+    let reply_ids: Vec<i32> = Message::find()
+        .select_only()
+        .column(message::Column::Id)
+        .filter(message::Column::SobaId.eq(room.id))
+        .filter(message::Column::ReplyToId.eq(stored_message.id))
+        .into_tuple()
+        .all(&db)
+        .await?;
+
     Message::delete_by_id(stored_message.id).exec(&db).await?;
-    let deletion = render_message_deletion_oob(stored_message.id);
+
+    let deletion = render_message_deletion_oob(stored_message.id, &reply_ids);
     broadcast_room_html(&state, room.id, deletion.clone())?;
 
     Ok(Html(deletion).into_response())
@@ -448,9 +458,10 @@ fn render_message(
     let quote_html = reply_preview
         .map(|p| {
             format!(
-                r#"<div class="reply-quote"><span class="reply-quote-sender">{}</span><span class="reply-quote-text">{}</span></div>"#,
-                html_escape(&p.sender_name),
-                html_escape(&truncate_preview(&p.content)),
+                r#"<div class="reply-quote" id="reply-quote-{reply_id}"><span class="reply-quote-sender">{sender}</span><span class="reply-quote-text">{content}</span></div>"#,
+                reply_id = msg.id,
+                sender = html_escape(&p.sender_name),
+                content = html_escape(&truncate_preview(&p.content)),
             )
         })
         .unwrap_or_default();
@@ -553,11 +564,20 @@ fn render_message_oob(
     )
 }
 
-fn render_message_deletion_oob(message_id: i32) -> String {
-    format!(
+fn render_message_deletion_oob(message_id: i32, reply_ids: &[i32]) -> String {
+    let mut html = format!(
         r#"<div id="msg-{message_id}" hx-swap-oob="delete"></div>
 <div id="search-msg-{message_id}" hx-swap-oob="delete"></div>"#
-    )
+    );
+
+    for reply_id in reply_ids {
+        html.push_str(&format!(
+            r#"
+<div id="reply-quote-{reply_id}" hx-swap-oob="delete"></div>"#
+        ));
+    }
+
+    html
 }
 
 /// Po uspešno oddanem sporočilu je treba izprazniti polje za vnos samo pri

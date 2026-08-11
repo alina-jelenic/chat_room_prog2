@@ -58,6 +58,7 @@ async fn websocket_reply_includes_quoted_preview_of_original_message() {
     .expect("odgovor ni bil prejet");
 
     assert!(reply.contains("reply-quote"));
+    assert!(reply.contains("id=\"reply-quote-"));
     assert!(reply.contains("alina"));
     assert!(reply.contains("prvo sporočilo za odgovor"));
 

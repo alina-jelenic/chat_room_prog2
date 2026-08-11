@@ -47,6 +47,19 @@ async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
     .insert(&db)
     .await
     .unwrap();
+
+    let reply_message = message::ActiveModel {
+        sender_id: Set(Some(other.id)),
+        content: Set("odgovor na izbrisano sporočilo".to_string()),
+        timestamp: Set(2),
+        soba_id: Set(room.id),
+        reply_to_id: Set(Some(stored_message.id)),
+        ..Default::default()
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+
     message_reactions::ActiveModel {
         message_id: Set(stored_message.id),
         client_id: Set(other.id),
@@ -106,6 +119,8 @@ async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
     assert!(deletion_response.contains(&format!("id=\"msg-{}\"", stored_message.id)));
     assert!(deletion_response.contains("hx-swap-oob=\"delete\""));
 
+    assert!(deletion_response.contains(&format!("id=\"reply-quote-{}\"", reply_message.id)));
+
     let notification = timeout(
         Duration::from_secs(2),
         recv_until(&mut other_socket, &format!("msg-{}", stored_message.id)),
@@ -113,6 +128,7 @@ async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
     .await
     .expect("drugi uporabnik ni prejel izbrisa");
     assert!(notification.contains("hx-swap-oob=\"delete\""));
+    assert!(notification.contains(&format!("id=\"reply-quote-{}\"", reply_message.id)));
     assert!(
         message::Entity::find_by_id(stored_message.id)
             .one(&db)
@@ -120,6 +136,13 @@ async fn only_sender_can_delete_a_message_and_connected_users_are_notified() {
             .unwrap()
             .is_none()
     );
+    let preserved_reply = message::Entity::find_by_id(reply_message.id)
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("odgovor mora po izbrisu izvirnika ostati");
+
+    assert_eq!(preserved_reply.reply_to_id, Some(stored_message.id));
     assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 0);
 
     other_socket.close(None).await.unwrap();
