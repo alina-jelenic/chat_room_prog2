@@ -22,6 +22,7 @@ use axum::{
 };
 use axum_extra::extract::cookie::CookieJar;
 use chrono::{Local, TimeZone};
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -301,15 +302,26 @@ fn render_load_older_button(room_name: &str, before_id: i32) -> String {
     )
 }
 
+fn escape_like(term: &str) -> String {
+    term.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 async fn render_message_search_page(
     db: &DatabaseConnection,
     room: &soba::Model,
     search_term: &str,
     before_id: Option<i32>,
 ) -> Result<String, AppError> {
+    let escaped = escape_like(search_term);
+    let pattern = format!("%{}%", escaped);
     let mut query = Message::find()
         .filter(message::Column::SobaId.eq(room.id))
-        .filter(message::Column::Content.contains(search_term));
+        .filter(Expr::cust_with_values(
+            "LOWER(content) LIKE LOWER(?) ESCAPE '\\'",
+            [pattern],
+        ));
     if let Some(before_id) = before_id {
         query = query.filter(message::Column::Id.lt(before_id));
     }
