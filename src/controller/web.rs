@@ -35,7 +35,13 @@ impl std::error::Error for AppError {}
 
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0).into_response()
+        eprintln!("Notranja napaka strežnika: {}", self.0);
+
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Prišlo je do notranje napake strežnika.",
+        )
+            .into_response()
     }
 }
 
@@ -322,6 +328,16 @@ async fn handle_socket(socket: WebSocket, user: AuthUser, room_name: String, sta
                                 match rooms::user_can_access_room(&db, &room, user.id).await {
                                     Ok(true) => {}
                                     Ok(false) | Err(_) => break true,
+                                }
+
+                                let may_react = match state.lock() {
+                                    Ok(mut state) => state.reserve_reaction(user.id),
+                                    Err(_) => break false,
+                                };
+
+                                if !may_react {
+                                    let _ = personal_tx.send(rooms::render_reaction_rate_limit_warning());
+                                    continue;
                                 }
 
                                 match rooms::toggle_reaction(&db, room.id, user.id, message_id, &emoji).await {

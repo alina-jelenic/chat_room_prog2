@@ -48,7 +48,7 @@ async fn message_search_is_room_scoped_authorized_and_html_escaped() {
         ("rust iz druge sobe", general.id),
     ] {
         message::ActiveModel {
-            sender_id: Set(Some(owner.id as i64)),
+            sender_id: Set(Some(owner.id)),
             content: Set(content.to_string()),
             timestamp: Set(1),
             soba_id: Set(room_id),

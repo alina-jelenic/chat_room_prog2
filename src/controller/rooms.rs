@@ -30,7 +30,7 @@ pub use messages::{
     render_message_input_reset, render_rate_limit_warning, search_messages,
     validate_message_content,
 };
-pub use reactions::toggle_reaction;
+pub use reactions::{render_reaction_rate_limit_warning, toggle_reaction};
 pub use views::render_kicked_redirect;
 
 use views::{

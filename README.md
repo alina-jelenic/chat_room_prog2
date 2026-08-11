@@ -12,7 +12,7 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 
 ## Struktura projekta
 
-```
+```text
 ├── Cargo.toml              # konfiguracija glavnega paketa in odvisnosti
 ├── README.md                # opis projekta
 ├── .env.example              # predloga za okoljske spremenljivke
@@ -39,7 +39,10 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │   │   ├── lib.rs                 # seznam vseh migracij
 │   │   └── m*.rs                   # posamezne migracijske datoteke
 │   └── README.md                 # navodila za uporabo migracijskega CLI-ja
-├── static/                    # statične HTML/CSS datoteke frontenda
+├── static/                 # statične datoteke frontenda
+│   ├── vendor/                 # lokalne frontend knjižnice
+│   │   ├── htmx.min.js                # lokalna knjižnica HTMX 2.0.10
+│   │   └── ws.js                      # lokalna HTMX WebSocket razširitev 2.0.4
 │   ├── index.html                # glavni vmesnik klepetalnice
 │   └── authorisation.html         # prijava in registracija
 ├── tests/
@@ -78,22 +81,22 @@ Z uporabo asinhronega modela sva ustvarila sistem, ki temelji na arhitekturi odj
 │       └── sessions.rs               # testi zavračanja WebSocket povezav brez veljavne seje
 └── .github/workflows/ci.yml    # CI: fmt, clippy, testi
 ```
+
 ## Uporabljeni paketi
- 
+
 - **axum** — spletni strežnik in usmerjanje (vključno z WebSocket nadgradnjo)
 - **SeaORM** + **sea-orm-migration** — ORM in upravljanje migracij (SQLite)
 - **tokio** — asinhrono izvajanje
 - **jsonwebtoken** — seje prek JWT
 - **argon2** — varno zgoščevanje gesel
-- **HTMX** (`htmx-ext-ws`) — dinamičen frontend brez pisanja JavaScripta;
-  vključno z reakcijami na sporočila in odgovori s citatom, ki so v
-  celoti implementirani prek `hx-swap-oob` fragmentov s strežnika
+- **HTMX 2.0.10 in htmx-ext-ws 2.0.4** — knjižnici sta shranjeni lokalno v static/vendor, zato delovanje aplikacije ni odvisno od razpoložljivosti zunanjega CDN-ja.
 
-**Opomba:** V kodi je uporabljeno malo JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX. 
+**Opomba:** V kodi je uporabljeno malo lastnega JavaScripta za indikator povezave, saj tega ni mogoče napisati s HTMX.
 
 ## Zagon projekta
 
-Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (Za ostale računalnike oz. uporabnike je po vzpostavitvi strežnika potreben le dostop do interneta). Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
+Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo deloval kot strežnik (za ostale računalnike oz. uporabnike je potreben le spletni brskalnik in omrežni dostop do računalnika, na katerem teče strežnik).
+Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust, prenesen GitHub repozitorij in vse potrebne pakete.
 
 1. Kopiraj .env.example v .env.
 2. V datoteki `.env` obvezno zamenjaj vrednost `JWT_SECRET=CHANGE_ME`
@@ -105,59 +108,66 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
    ```env
    JWT_SECRET=tukaj-vstavi-dolgo-nakljucno-skrivnost-z-vsaj-32-znaki
    ```
-3. Zaženi aplikacijo:
+
+3. Vse ukaze za zagon izvajamo iz korenske mape repozitorija. Strežnik statične datoteke nalaga iz relativne poti static,
+  zato lahko zagon binarne datoteke iz drugega delovnega imenika povzroči odgovore 404.
+
+  Zaženi aplikacijo:
+
 ```sh
    cargo run
 ```
+
    Ob zagonu se samodejno izvedejo vse manjkajoče migracije in ustvari
    soba `#general`, če še ne obstaja.
-
 4. Odloči se, kako bodo odjemalci dostopali do strežnika, in ustrezno
    nastavi `SERVER_ADDR` v `.env`.
 
-    ### a) Samo na istem računalniku
+### a) Samo na istem računalniku
 
-   Privzeta nastavitev že deluje brez sprememb (`SERVER_ADDR=127.0.0.1:3000`).
-   Aplikacijo odpreš v brskalniku na istem računalniku na naslovu: http://127.0.0.1:3000
+Privzeta nastavitev že deluje brez sprememb (`SERVER_ADDR=127.0.0.1:3000`).
+Aplikacijo odpreš v brskalniku na istem računalniku na naslovu: [http://127.0.0.1:3000](http://127.0.0.1:3000)
 
-    ### b) Več naprav v istem omrežju (isti WiFi)
+### b) Več naprav v istem omrežju (isti WiFi)
 
-   Strežnik mora poslušati na vseh omrežnih vmesnikih, ne samo na
-   `127.0.0.1`. V `.env` nastavi: `SERVER_ADDR=0.0.0.0:3000`.
-   Nato ugotovi lokalni IP naslov računalnika, na katerem teče strežnik:
+Strežnik mora poslušati na vseh omrežnih vmesnikih, ne samo na
+`127.0.0.1`. V `.env` nastavi: `SERVER_ADDR=0.0.0.0:3000`.
+Nato ugotovi lokalni IP naslov računalnika, na katerem teče strežnik:
 
-   - Windows: `ipconfig` (poišči "IPv4 Address")
-   - macOS / Linux: `ifconfig` ali `ip addr` (ali `hostname -I`)
+- Windows: `ipconfig` (poišči "IPv4 Address")
+- macOS / Linux: `ifconfig` ali `ip addr` (ali `hostname -I`)
 
-   Drugi uporabniki v istem omrežju nato v brskalniku odprejo: http://<IP-naslov-strežnika>:3000
-   Če se ne morejo povezati, preveri, ali požarni zid (firewall) na
-   računalniku s strežnikom blokira vrata 3000 (npr. na Windows: Windows
-   Defender Firewall → Dovoljene aplikacije; na Linuxu z `ufw`:
-   `sudo ufw allow 3000`).
+Drugi uporabniki v istem omrežju nato v brskalniku odprejo: http://<IP-naslov-strežnika>:3000
+Če se ne morejo povezati, preveri, ali požarni zid (firewall) na
+računalniku s strežnikom blokira vrata 3000 (npr. na Windows: Windows
+Defender Firewall → Dovoljene aplikacije; na Linuxu z `ufw`:
+`sudo ufw allow 3000`).
 
-    ### c) Naprave v različnih omrežjih (dostop prek interneta)
+### c) Naprave v različnih omrežjih (dostop prek interneta)
 
-   To zahteva, da je strežnik dosegljiv od zunaj tvojega domačega omrežja.
-   Najenostavnejša pot je Cloudflare Quick Tunnel — brezplačna storitev, ki
-   ne zahteva registracije računa ne lastne domene.
+To zahteva, da je strežnik dosegljiv od zunaj tvojega domačega omrežja.
+Najenostavnejša pot je Cloudflare Quick Tunnel — brezplačna storitev, ki
+ne zahteva registracije računa ne lastne domene.
 
-    1. Namesti orodje `cloudflared`:
+1. Namesti orodje `cloudflared`:
       - **Windows:** `winget install Cloudflare.cloudflared`
       - **macOS:** `brew install cloudflare/cloudflare/cloudflared`
       - **Linux (Debian/Ubuntu):**
-      ```sh
+
+        ```sh
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
         sudo dpkg -i cloudflared.deb
-      ```
+        ```
 
       Za druge distribucije glej [uradno stran za prenos](https://developers.cloudflare.com/tunnel/downloads/).
+2. Zaženi aplikacijo lokalno (`cargo run`, glej korak 3 zgoraj).
+3. V ločenem terminalu zaženi:
 
-   2. Zaženi aplikacijo lokalno (`cargo run`, glej korak 3 zgoraj).
-   3. V ločenem terminalu zaženi:
     ```sh
       cloudflared tunnel --url http://localhost:3000
     ```
-   4. V izpisu poišči vrstico z naslovom, ki se konča na
+
+4. V izpisu poišči vrstico z naslovom, ki se konča na
       `.trycloudflare.com` (npr. `https://xxxx-xx-xx.trycloudflare.com`).
       Ta naslov deluje takoj in ga lahko deliš s komerkoli, ne glede na to,
       v katerem omrežju je — povezava ostane aktivna, dokler v terminalu
@@ -168,7 +178,7 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
    > in ni namenjen produkcijski postavitvi.
 
 ## Glavne funkcionalnosti
- 
+
 - **Registracija in prijava** z uporabniškim imenom in geslom; gesla so
   zgoščena z argon2, seja pa se hrani v HttpOnly piškotku kot JWT žeton.
 - **Klepetalne sobe**: soba `#general` je na voljo vsem, dodatne sobe pa
@@ -177,9 +187,9 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
 - **Upravljanje članstva**: pridružitev in zapustitev sobe ter pregled in
   izključevanje članov s strani lastnika. Sobo lahko izbriše samo njen lastnik.
 - **Sporočila v realnem času** prek WebSocket povezave in HTMX (`ws-send`,
-  `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu. 
+  `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu.
 - **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
-  (50 na stran), starejša sporočila se naložijo na zahtevo. 
+  (50 na stran), starejša sporočila se naložijo na zahtevo.
 - **Odgovori na sporočila**: zraven vsakega sporočila je gumb
   "Odgovori", ki  da možnost, da odgovoriš na določeno sporočilo. Pri tem se
   nad tem sporočilom prikaže trak, tako da se ve kateremu sporočilu si dal
@@ -192,6 +202,12 @@ Za uporabo projekta, se je najprej treba odločiti, kateri računalnik bo delova
   prikaže vsem povezanim uporabnikom.
 - **Reakcije na sporočila**, ki jih lahko uporabniki dodajo ali odstranijo.
 - **Omejevanje hitrosti pošiljanja**, skupno vsem povezavam istega uporabnika.
+
+## Načrtovalske odločitve
+
+- Ob izbrisu izvirnega sporočila odgovori nanj ostanejo, citat izvirnega
+  sporočila pa se ne prikazuje več. Takšno obnašanje je namerno, saj
+  izbris odstrani njegovo vsebino tudi iz predogledov v odgovorih.
 
 ## Testiranje
 
@@ -211,3 +227,11 @@ Vse teste zaženemo z:
 ```sh
 cargo test --workspace --all-targets --locked
 ```
+
+### Opomba o vrstnem redu migracij
+
+Migracija za odgovore ohranja starejše ime
+`m20250807_000001_message_reply`, čeprav je na seznamu izvedena za
+novejšimi migracijami. Ime je namenoma ohranjeno, ker ga SeaORM zapiše
+v tabelo `seaql_migrations`; preimenovanje bi obstoječa baza lahko
+obravnavala kot novo migracijo.

@@ -1,5 +1,9 @@
 use crate::common::{assert_login_redirect, body_text, form_request, test_app};
-use axum::http::{StatusCode, header::SET_COOKIE};
+use axum::{
+    http::{StatusCode, header::SET_COOKIE},
+    response::IntoResponse,
+};
+use chat_room_prog2::controller::web::AppError;
 
 use tower::ServiceExt;
 
@@ -107,4 +111,15 @@ async fn login_me_and_logout_manage_the_session_cookie() {
     assert!(removal.contains("chat_session="));
     assert!(removal.contains("Max-Age=0"));
     assert!(removal.contains("Path=/"));
+}
+
+#[tokio::test]
+async fn internal_errors_do_not_expose_details() {
+    let response = AppError("SQL napaka: skrivna notranja podrobnost".to_string()).into_response();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        body_text(response).await,
+        "Prišlo je do notranje napake strežnika."
+    );
 }

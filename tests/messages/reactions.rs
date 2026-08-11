@@ -2,14 +2,17 @@ use crate::common::{
     body_text, form_request, recv_until, register_and_login, start_server, test_app,
     websocket_request,
 };
-use chat_room_prog2::entities::{
-    client, message,
-    prelude::{Client, MessageReactions, Soba},
-    soba,
+use chat_room_prog2::{
+    controller::tipi::REACTION_COOLDOWN,
+    entities::{
+        client, message,
+        prelude::{Client, MessageReactions, Soba},
+        soba,
+    },
 };
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, sleep, timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tower::ServiceExt;
 
@@ -57,7 +60,7 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
         .unwrap();
 
     let target_message = message::ActiveModel {
-        sender_id: Set(Some(owner.id as i64)),
+        sender_id: Set(Some(owner.id)),
         content: Set("sporočilo za reakcijo".to_string()),
         timestamp: Set(1),
         soba_id: Set(room.id),
@@ -107,10 +110,11 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
     .expect("lastnik ni prejel članovega pripravljalnega sporočila");
 
     // Član doda reakcijo 👍.
+    let reaction_payload =
+        format!(r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#);
+
     member_socket
-        .send(WsMessage::Text(
-            format!(r#"{{"reaction_message_id":"{message_id}","reaction_emoji":"👍"}}"#).into(),
-        ))
+        .send(WsMessage::Text(reaction_payload.clone().into()))
         .await
         .unwrap();
 
@@ -125,7 +129,25 @@ async fn reaction_toggle_updates_counts_and_broadcasts_to_room() {
         .expect("član ni prejel potrditve svoje reakcije");
     assert!(member_saw_reaction.contains("👍 1"));
 
+    // Takojšen drugi klik mora sprožiti omejitev hitrosti.
+    member_socket
+        .send(WsMessage::Text(reaction_payload.into()))
+        .await
+        .unwrap();
+
     assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
+
+    let warning = timeout(
+        Duration::from_secs(2),
+        recv_until(&mut member_socket, "Reakcije dodajaš prehitro"),
+    )
+    .await
+    .expect("uporabnik ni prejel opozorila za prehitro reakcijo");
+
+    assert!(warning.contains("message-status"));
+    assert_eq!(MessageReactions::find().count(&db).await.unwrap(), 1);
+
+    sleep(REACTION_COOLDOWN + Duration::from_millis(50)).await;
 
     // Ponoven klik na isto reakcijo jo mora odstraniti (toggle).
     member_socket
