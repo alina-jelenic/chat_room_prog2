@@ -197,7 +197,9 @@ ne zahteva registracije računa ne lastne domene.
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).
-- **Iskanje po zgodovini** z omejitvijo rezultatov na trenutno sobo.
+- **Iskanje po zgodovini**, ki je omejen na iskanje po določeni sobi. Iskanje je 
+  neodvisno od velikosti ASCII znakov, vendar pa je občitljivo na velikost črk, če
+  je v besedi šumnik. 
 - **Brisanje lastnih sporočil**, pri katerem se sprememba v realnem času
   prikaže vsem povezanim uporabnikom.
 - **Reakcije na sporočila**, ki jih lahko uporabniki dodajo ali odstranijo.
