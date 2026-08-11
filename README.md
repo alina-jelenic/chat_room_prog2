@@ -197,9 +197,9 @@ ne zahteva registracije računa ne lastne domene.
 - **Migracije baze**, ki ohranjajo obstoječe podatke pri nadgradnji sheme
   (npr. dodajanje stolpca za geslo ali povezovanje sporočil s sobami na
   starejših, že napolnjenih bazah).
-- **Iskanje po zgodovini**, ki je omejen na iskanje po določeni sobi. Iskanje je 
+- **Iskanje po zgodovini**, ki je omejen na iskanje po določeni sobi. Iskanje je
   neodvisno od velikosti ASCII znakov, vendar pa je občitljivo na velikost črk, če
-  je v besedi šumnik. 
+  je v besedi šumnik.
 - **Brisanje lastnih sporočil**, pri katerem se sprememba v realnem času
   prikaže vsem povezanim uporabnikom.
 - **Reakcije na sporočila**, ki jih lahko uporabniki dodajo ali odstranijo.
@@ -229,11 +229,3 @@ Vse teste zaženemo z:
 ```sh
 cargo test --workspace --all-targets --locked
 ```
-
-### Opomba o vrstnem redu migracij
-
-Migracija za odgovore ohranja starejše ime
-`m20250807_000001_message_reply`, čeprav je na seznamu izvedena za
-novejšimi migracijami. Ime je namenoma ohranjeno, ker ga SeaORM zapiše
-v tabelo `seaql_migrations`; preimenovanje bi obstoječa baza lahko
-obravnavala kot novo migracijo.
