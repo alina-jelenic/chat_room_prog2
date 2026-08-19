@@ -25,6 +25,8 @@ mod reactions;
 pub mod reply;
 mod views;
 
+pub const DEFAULT_ROOM_NAME: &str = "general";
+
 pub use messages::{
     create_websocket_message, delete_message, list_messages, render_message_error,
     render_message_input_reset, render_rate_limit_warning, search_messages,
@@ -82,7 +84,7 @@ pub async fn prepare_database_schema(db: &DatabaseConnection) -> Result<(), AppE
 pub async fn ensure_default_room(db: &DatabaseConnection) -> Result<(), AppError> {
     // Aplikacija trenutno predvideva sobo "general" že v HTML-ju.
     // Zato jo ustvarimo ob zagonu, če še ne obstaja.
-    ensure_room_exists(db, "general", None).await?;
+    ensure_room_exists(db, DEFAULT_ROOM_NAME, None).await?;
     Ok(())
 }
 
@@ -190,7 +192,7 @@ pub async fn user_can_access_room(
     room: &soba::Model,
     user_id: i64,
 ) -> Result<bool, AppError> {
-    if room.name == "general" {
+    if room.name == DEFAULT_ROOM_NAME {
         return Ok(true);
     }
 
@@ -303,7 +305,7 @@ pub async fn list_rooms(
     let db = db_from_state(&state)?;
     ensure_default_room(&db).await?;
 
-    Ok(Html(render_room_list(&db, user.id, "general").await?).into_response())
+    Ok(Html(render_room_list(&db, user.id, DEFAULT_ROOM_NAME).await?).into_response())
 }
 
 pub async fn create_room(
@@ -421,12 +423,12 @@ pub async fn join_room(
         }
     };
 
-    let joined_now = if room.name == "general" {
+    let joined_now = if room.name == DEFAULT_ROOM_NAME {
         false
     } else {
         ensure_room_membership(&db, room.id, user.id).await?
     };
-    let room = if room.owner_id.is_none() && room.name != "general" {
+    let room = if room.owner_id.is_none() && room.name != DEFAULT_ROOM_NAME {
         let mut active: soba::ActiveModel = room.into();
         active.owner_id = Set(Some(user.id));
         active.update(&db).await?
@@ -462,7 +464,7 @@ pub async fn leave_room(
         Ok(name) => name,
         Err(error) => return Ok(room_action_retarget_response("error", &error.0)),
     };
-    if clean_name == "general" {
+    if clean_name == DEFAULT_ROOM_NAME {
         return Ok(room_action_retarget_response(
             "error",
             "Sobe general ni mogoče zapustiti.",
@@ -504,7 +506,7 @@ pub async fn leave_room(
     // povezave, ki po odhodu ne pošljejo nobenega novega sporočila.
     notify_room_access_revoked(&state, room.id, user.id, RoomAccessRevokedReason::Left)?;
 
-    let general = ensure_room_exists(&db, "general", None).await?;
+    let general = ensure_room_exists(&db, DEFAULT_ROOM_NAME, None).await?;
     let room_list = render_room_list(&db, user.id, &general.name).await?;
     let mut html = render_chat_panel(&general, &user);
     html.push_str(&render_room_list_oob(&room_list));
@@ -596,7 +598,7 @@ pub async fn delete_room(
         Ok(name) => name,
         Err(error) => return Ok(room_action_retarget_response("error", &error.0)),
     };
-    if clean_name == "general" {
+    if clean_name == DEFAULT_ROOM_NAME {
         return Ok((StatusCode::BAD_REQUEST, "Sobe general ni mogoče izbrisati.").into_response());
     }
 
@@ -632,7 +634,7 @@ pub async fn delete_room(
     Soba::delete_by_id(room.id).exec(&transaction).await?;
     transaction.commit().await?;
 
-    let general = ensure_room_exists(&db, "general", None).await?;
+    let general = ensure_room_exists(&db, DEFAULT_ROOM_NAME, None).await?;
     let room_list = render_room_list(&db, user.id, &general.name).await?;
     notify_room_deleted(&state, room.id, &room.name)?;
 

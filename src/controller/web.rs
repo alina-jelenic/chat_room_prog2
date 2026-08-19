@@ -157,7 +157,7 @@ async fn ws_handler(
     let room_name = query
         .room_name
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| "general".to_string());
+        .unwrap_or_else(|| rooms::DEFAULT_ROOM_NAME.to_string());
 
     ws.on_upgrade(move |socket| handle_socket(socket, user, room_name, state))
         .into_response()

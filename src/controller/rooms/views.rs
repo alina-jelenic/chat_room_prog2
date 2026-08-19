@@ -10,6 +10,7 @@ use crate::entities::prelude::{Client, RoomMember, Soba};
 use crate::entities::{client, room_member, soba};
 use axum::response::{Html, IntoResponse, Response};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use super::DEFAULT_ROOM_NAME;
 pub(super) async fn render_room_list(
     db: &DatabaseConnection,
     user_id: i64,
@@ -23,7 +24,7 @@ pub(super) async fn render_room_list(
         .map(|membership| membership.soba_id)
         .collect::<Vec<_>>();
 
-    if let Some(general) = room_for_websocket(db, "general").await? {
+    if let Some(general) = room_for_websocket(db, DEFAULT_ROOM_NAME).await? {
         room_ids.push(general.id);
     }
     room_ids.sort_unstable();
@@ -110,7 +111,7 @@ fn render_chat_panel_variant(room: &soba::Model, user: &AuthUser, oob: bool) -> 
     } else {
         ""
     };
-    let room_control = if room.name == "general" {
+    let room_control = if room.name == DEFAULT_ROOM_NAME {
         String::new()
     } else if room.owner_id == Some(user.id) {
         format!(
