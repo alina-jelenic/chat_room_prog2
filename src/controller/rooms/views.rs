@@ -1,5 +1,6 @@
 //! HTML-prikaz sob in članov ter realnočasovna obvestila o spremembah dostopa.
 
+use super::DEFAULT_ROOM_NAME;
 use super::messages::{MAX_MESSAGE_LENGTH, MAX_SEARCH_LENGTH};
 use super::room_for_websocket;
 use crate::controller::auth::AuthUser;
@@ -10,7 +11,6 @@ use crate::entities::prelude::{Client, RoomMember, Soba};
 use crate::entities::{client, room_member, soba};
 use axum::response::{Html, IntoResponse, Response};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
-use super::DEFAULT_ROOM_NAME;
 pub(super) async fn render_room_list(
     db: &DatabaseConnection,
     user_id: i64,
