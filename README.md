@@ -119,7 +119,7 @@ Potem na tem računalniku izvedemo naslednje korake, ko že imamo naložen Rust,
 ```
 
    Ob zagonu se samodejno izvedejo vse manjkajoče migracije in ustvari
-   soba `#general`, če še ne obstaja.
+   soba `#general`, če še ne obstaja. 
 4. Odloči se, kako bodo odjemalci dostopali do strežnika, in ustrezno
    nastavi `SERVER_ADDR` v `.env`.
 
@@ -181,14 +181,15 @@ ne zahteva registracije računa ne lastne domene.
 
 - **Registracija in prijava** z uporabniškim imenom in geslom; gesla so
   zgoščena z argon2, seja pa se hrani v HttpOnly piškotku kot JWT žeton.
-- **Klepetalne sobe**: soba `#general` je na voljo vsem, dodatne sobe pa
-  lahko uporabniki ustvarijo (postanejo njihov lastnik) ali se jim
+- **Klepetalne sobe**: soba `#general` je na voljo vsem (v primeru spremembe 
+  imena je potrebno ime spremeniti tudi v migraciji oz. bazi), dodatne sobe
+  pa lahko uporabniki ustvarijo (postanejo njihov lastnik) ali se jim
   pridružijo prek numeričnega ID-ja sobe.
 - **Upravljanje članstva**: pridružitev in zapustitev sobe ter pregled in
   izključevanje članov s strani lastnika. Sobo lahko izbriše samo njen lastnik.
 - **Sporočila v realnem času** prek WebSocket povezave in HTMX (`ws-send`,
   `hx-swap-oob`) brez ročnega pisanja JavaScripta na frontendu.
-- **Zgodovina sporočil s straničenjem**: sporočila se nalagajo po straneh
+- **Zgodovina sporočil se nalaga po delih**: sporočila se nalagajo po straneh
   (50 na stran), starejša sporočila se naložijo na zahtevo.
 - **Odgovori na sporočila**: zraven vsakega sporočila je gumb
   "Odgovori", ki  da možnost, da odgovoriš na določeno sporočilo. Pri tem se
